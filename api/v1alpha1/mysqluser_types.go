@@ -20,6 +20,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Grant defines the privileges and the resource for a MySQL user
+type Grant struct {
+	// Privileges for the MySQL user
+	Privileges []string `json:"privileges"`
+
+	// Resource on which the privileges are applied
+	Target string `json:"target"`
+}
+
 // MySQLUserSpec defines the desired state of MySQLUser
 type MySQLUserSpec struct {
 
@@ -29,8 +38,11 @@ type MySQLUserSpec struct {
 	// +kubebuilder:default=%
 	// +kubebuilder:validation:Optional
 
-	// MySQL hostname for MySQL account
+	// Host address where the client connects, default to '%'
 	Host string `json:"host"`
+
+	// Grants of database user
+	Grants []Grant `json:"grants,omitempty"`
 }
 
 // MySQLUserStatus defines the observed state of MySQLUser
@@ -44,15 +56,23 @@ type MySQLUserStatus struct {
 	Phase      string             `json:"phase,omitempty"`
 	Reason     string             `json:"reason,omitempty"`
 
+	// User identity in format 'username'@'host'
+	UserIdentity string `json:"userIdentity,omitempty"`
+
 	// +kubebuilder:default=false
 
-	// true if MySQL user is created
-	MySQLUserCreated bool `json:"mysql_user_created,omitempty"`
+	// true if User is created
+	MySQLUserCreated bool `json:"mysqlUserCreated,omitempty"`
 
 	// +kubebuilder:default=false
 
 	// true if Secret is created
-	SecretCreated bool `json:"secret_created,omitempty"`
+	SecretCreated bool `json:"secretCreated,omitempty"`
+
+	// +kubebuilder:default=false
+
+	// true if Grants are updated
+	GrantsUpdated bool `json:"grantsUpdated,omitempty"`
 }
 
 func (m *MySQLUser) GetConditions() []metav1.Condition {
@@ -65,8 +85,9 @@ func (m *MySQLUser) SetConditions(conditions []metav1.Condition) {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="MySQLUser",type="boolean",JSONPath=".status.mysql_user_created",description="true if MySQL user is created"
-//+kubebuilder:printcolumn:name="Secret",type="boolean",JSONPath=".status.secret_created",description="true if Secret is created"
+//+kubebuilder:printcolumn:name="MySQLUser",type="boolean",JSONPath=".status.mysqlUserCreated",description="true if MySQL user is created"
+//+kubebuilder:printcolumn:name="Secret",type="boolean",JSONPath=".status.secretCreated",description="true if Secret is created"
+//+kubebuilder:printcolumn:name="Grants",type="boolean",JSONPath=".status.grantsUpdated",description="true if Grants are updated"
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="The phase of this MySQLUser"
 //+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason",description="The reason for the current phase of this MySQLUser"
 
