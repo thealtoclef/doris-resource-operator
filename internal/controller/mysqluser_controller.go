@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"sort"
@@ -203,8 +204,12 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err // requeue
 		}
 	} else { // exists -> get password from Secret
-		password = string(secret.Data["password"])
-		// TODO: check if the password is valid
+		encodedPassword := secret.Data["password"]
+		passwordBytes, err := base64.StdEncoding.DecodeString(string(encodedPassword))
+		if err != nil {
+			log.Error(err, "[password] Failed to decode password from Secret", "secretName", secretName)
+		}
+		password = string(passwordBytes)
 	}
 	mysqlUser.Status.SecretCreated = true
 
@@ -291,7 +296,7 @@ func (r *MySQLUserReconciler) finalizeMySQLUser(ctx context.Context, mysqlClient
 }
 
 func getSecretName(mysqlName string, mysqlUserName string) string {
-	str := []string{"mysql", mysqlName, mysqlUserName}
+	str := []string{mysqlName, mysqlUserName}
 	return strings.Join(str, "-")
 }
 
