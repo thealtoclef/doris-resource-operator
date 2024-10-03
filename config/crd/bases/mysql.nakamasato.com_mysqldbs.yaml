@@ -52,12 +52,14 @@ spec:
           spec:
             description: MySQLDBSpec defines the desired state of MySQLDB
             properties:
+              clusterName:
+                description: Cluster name to reference to, which decides the destination
+                type: string
+                x-kubernetes-validations:
+                - message: Cluster name is immutable
+                  rule: self == oldSelf
               dbName:
                 description: MySQL Database name
-                type: string
-              mysqlName:
-                description: MySQL (CRD) name to reference to, which decides the destination
-                  MySQL server
                 type: string
               schemaMigrationFromGitHub:
                 description: MySQL Database Schema Migrations from GitHub
@@ -76,8 +78,8 @@ spec:
                 - repo
                 type: object
             required:
+            - clusterName
             - dbName
-            - mysqlName
             type: object
           status:
             description: MySQLDBStatus defines the observed state of MySQLDB

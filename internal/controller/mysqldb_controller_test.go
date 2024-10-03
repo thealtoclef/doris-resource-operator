@@ -64,7 +64,7 @@ var _ = Describe("MySQLDB controller", func() {
 			mysqlDB := &mysqlv1alpha1.MySQLDB{
 				TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLDB"},
 				ObjectMeta: metav1.ObjectMeta{Name: "sample-db", Namespace: Namespace},
-				Spec:       mysqlv1alpha1.MySQLDBSpec{DBName: "sample_db", MysqlName: MySQLName},
+				Spec:       mysqlv1alpha1.MySQLDBSpec{DBName: "sample_db", ClusterName: MySQLName},
 			}
 			Expect(k8sClient.Create(ctx, mysqlDB)).Should(Succeed())
 			Eventually(func() bool {
@@ -91,7 +91,7 @@ var _ = Describe("MySQLDB controller", func() {
 			mysqlDB := &mysqlv1alpha1.MySQLDB{
 				TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLDB"},
 				ObjectMeta: metav1.ObjectMeta{Name: "sample-db", Namespace: Namespace},
-				Spec:       mysqlv1alpha1.MySQLDBSpec{DBName: "sample_db", MysqlName: MySQLName},
+				Spec:       mysqlv1alpha1.MySQLDBSpec{DBName: "sample_db", ClusterName: MySQLName},
 			}
 			Expect(k8sClient.Create(ctx, mysqlDB)).Should(Succeed())
 			Eventually(func() string {
@@ -107,7 +107,7 @@ var _ = Describe("MySQLDB controller", func() {
 			mysqlDB := &mysqlv1alpha1.MySQLDB{
 				TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLDB"},
 				ObjectMeta: metav1.ObjectMeta{Name: "sample-db", Namespace: Namespace},
-				Spec:       mysqlv1alpha1.MySQLDBSpec{DBName: "sample_db", MysqlName: MySQLName},
+				Spec:       mysqlv1alpha1.MySQLDBSpec{DBName: "sample_db", ClusterName: MySQLName},
 			}
 			Expect(k8sClient.Create(ctx, mysqlDB)).Should(Succeed())
 			Eventually(func() string {

@@ -40,7 +40,6 @@ import (
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
 	"github.com/nakamasato/mysql-operator/internal/metrics"
 	mysqlinternal "github.com/nakamasato/mysql-operator/internal/mysql"
-	"github.com/nakamasato/mysql-operator/internal/utils"
 )
 
 const (
@@ -49,7 +48,7 @@ const (
 	mysqlUserReasonMySQLConnectionFailed       = "Failed to connect to MySQL"
 	mysqlUserReasonMySQLFailedToCreateUser     = "Failed to create User"
 	mysqlUserReasonMySQLFailedToUpdatePassword = "Failed to update password of User"
-	mysqlUserReasonMySQLFailedToCreateSecret   = "Failed to create Secret"
+	mysqlUserReasonMySQLFailedToGetSecret      = "Failed to get Secret"
 	mysqlUserReasonMYSQLFailedToGrantPrivs     = "Failed to grant Privileges"
 	mysqlUserReasonMySQLFetchFailed            = "Failed to fetch MySQL"
 	mysqlUserPhaseReady                        = "Ready"
@@ -88,14 +87,14 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 	log.Info("[FetchMySQLUser] Found.", "name", mysqlUser.Name, "mysqlUser.Namespace", mysqlUser.Namespace)
-	mysqlUserName := mysqlUser.Name
-	mysqlUserHost := mysqlUser.Spec.Host
-	mysqlName := mysqlUser.Spec.MysqlName
-	mysqlUserGrants := mysqlUser.Spec.Grants
+	clusterName := mysqlUser.Spec.ClusterName
+	userIdentity := mysqlUser.GetUserIdentity()
+	secretRef := mysqlUser.Spec.SecretRef
+	grants := mysqlUser.Spec.Grants
 
 	// Fetch MySQL
 	mysql := &mysqlv1alpha1.MySQL{}
-	var mysqlNamespacedName = client.ObjectKey{Namespace: req.Namespace, Name: mysqlUser.Spec.MysqlName}
+	var mysqlNamespacedName = client.ObjectKey{Namespace: req.Namespace, Name: clusterName}
 	if err := r.Get(ctx, mysqlNamespacedName, mysql); err != nil {
 		log.Error(err, "[FetchMySQL] Failed")
 		mysqlUser.Status.Phase = mysqlUserPhaseNotReady
@@ -178,46 +177,25 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Get password from Secret if exists. Otherwise, generate new one.
-	secretName := getSecretName(mysqlName, mysqlUserName)
+	// Get password from Secret
 	secret := &v1.Secret{}
-	err = r.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: secretName}, secret)
-	var password string
+	err = r.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: secretRef.Name}, secret)
 	if err != nil {
-		if errors.IsNotFound(err) { // Secret doesn't exists -> generate password
-			log.Info("[password] Generate new password for Secret", "secretName", secretName)
-			password = utils.GenerateRandomString(16)
-			// Create Secret with the password
-			err = r.createSecret(ctx, password, secretName, mysqlUser.Namespace, mysqlUser)
-			if err != nil {
-				log.Error(err, "Failed to create Secret", "secretName", secretName, "namespace", mysqlUser.Namespace, "mysqlUser", mysqlUser.Name)
-				mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToCreateSecret
-				mysqlUser.Status.SecretCreated = false
-				if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
-					log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
-					return ctrl.Result{RequeueAfter: time.Second}, nil
-				}
-				return ctrl.Result{}, err
-			}
-		} else {
-			log.Error(err, "[password] Failed to get Secret", "secretName", secretName)
-			return ctrl.Result{}, err // requeue
-		}
-	} else { // exists -> get password from Secret
-		log.Info("[password] Get password from Secret", "secretName", secretName)
-		password = string(secret.Data["password"])
+		log.Error(err, "[password] Failed to get Secret", "secretRef", secretRef)
+		mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToGetSecret
+		return ctrl.Result{}, err // requeue
 	}
-	mysqlUser.Status.SecretCreated = true
+	log.Info("[password] Get password from Secret", "secretRef", secretRef)
+	password := string(secret.Data[secretRef.Key])
 
 	// Check if MySQL user exists
-	userIdentity := fmt.Sprintf("'%s'@'%s'", strings.ReplaceAll(mysqlUserName, "-", "_"), mysqlUserHost)
 	_, err = mysqlClient.ExecContext(ctx, fmt.Sprintf("SHOW GRANTS FOR %s", userIdentity))
 	if err != nil {
 		// Create User if not exists with the password set above.
 		_, err = mysqlClient.ExecContext(ctx,
 			fmt.Sprintf("CREATE USER IF NOT EXISTS %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
-			log.Error(err, "[MySQL] Failed to create User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
+			log.Error(err, "[MySQL] Failed to create User", "clusterName", clusterName, "userIdentity", userIdentity)
 			mysqlUser.Status.Phase = mysqlUserPhaseNotReady
 			mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToCreateUser
 			mysqlUser.Status.UserCreated = false
@@ -227,14 +205,14 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
 		}
-		log.Info("[MySQL] Created User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
-		metrics.MysqlUserCreatedTotal.Increment() // TODO: increment only when a user is created
+		log.Info("[MySQL] Created User", "clusterName", clusterName, "userIdentity", userIdentity)
+		metrics.MysqlUserCreatedTotal.Increment()
 	} else {
 		// Update password of User if already exists with the password set above.
 		_, err = mysqlClient.ExecContext(ctx,
 			fmt.Sprintf("ALTER USER %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
-			log.Error(err, "[MySQL] Failed to update password of User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
+			log.Error(err, "[MySQL] Failed to update password of User", "clusterName", clusterName, "userIdentity", userIdentity)
 			mysqlUser.Status.Phase = mysqlUserPhaseNotReady
 			mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToUpdatePassword
 			mysqlUser.Status.PasswordUpdated = false
@@ -244,16 +222,15 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
 		}
-		log.Info("[MySQL] Updated password of User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
+		log.Info("[MySQL] Updated password of User", "clusterName", clusterName, "userIdentity", userIdentity)
 	}
-	mysqlUser.Status.UserIdentity = userIdentity
 	mysqlUser.Status.UserCreated = true
 	mysqlUser.Status.PasswordUpdated = true
 
 	// Update Grants
-	err = r.updateGrants(ctx, mysqlClient, userIdentity, mysqlUserGrants)
+	err = r.updateGrants(ctx, mysqlClient, userIdentity, grants)
 	if err != nil {
-		log.Error(err, "[MySQL] Failed to update Grants", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
+		log.Error(err, "[MySQL] Failed to update Grants", "clusterName", clusterName, "userIdentity", userIdentity)
 		mysqlUser.Status.Reason = mysqlUserReasonMYSQLFailedToGrantPrivs
 		if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
@@ -283,44 +260,13 @@ func (r *MySQLUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // finalizeMySQLUser drops MySQL user
 func (r *MySQLUserReconciler) finalizeMySQLUser(ctx context.Context, mysqlClient *sql.DB, mysqlUser *mysqlv1alpha1.MySQLUser) error {
 	if mysqlUser.Status.UserCreated {
-		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP USER IF EXISTS %s", mysqlUser.Status.UserIdentity))
+		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP USER IF EXISTS '%s'@'%s'", mysqlUser.Spec.Username, mysqlUser.Spec.Host))
 		if err != nil {
 			return err
 		}
 		metrics.MysqlUserDeletedTotal.Increment()
 	}
 
-	return nil
-}
-
-func getSecretName(mysqlName string, mysqlUserName string) string {
-	str := []string{mysqlName, mysqlUserName}
-	return strings.Join(str, "-")
-}
-
-func (r *MySQLUserReconciler) createSecret(ctx context.Context, password string, secretName string, namespace string, mysqlUser *mysqlv1alpha1.MySQLUser) error {
-	log := log.FromContext(ctx)
-	data := make(map[string][]byte)
-	data["password"] = []byte(password)
-	secret := &v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: namespace,
-		},
-	}
-	err := ctrl.SetControllerReference(mysqlUser, secret, r.Scheme) // Set owner of this Secret
-	if err != nil {
-		log.Error(err, "Failed to SetControllerReference for Secret.")
-		return err
-	}
-	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, secret, func() error {
-		secret.Data = data
-		log.Info("Successfully created Secret.")
-		return nil
-	}); err != nil {
-		log.Error(err, "Error creating or updating Secret.")
-		return err
-	}
 	return nil
 }
 
@@ -461,35 +407,73 @@ func buildGrants(privs sql.NullString, entityType EntityType) ([]mysqlv1alpha1.G
 	return grants, nil
 }
 
-func grantKey(grant mysqlv1alpha1.Grant) string {
-	return fmt.Sprintf("%s:%s", strings.Join(grant.Privileges, ","), grant.Target)
-}
-
 func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRevoke, grantsToAdd []mysqlv1alpha1.Grant) {
 	oldGrantMap := make(map[string]mysqlv1alpha1.Grant)
 	newGrantMap := make(map[string]mysqlv1alpha1.Grant)
 
 	for _, grant := range oldGrants {
-		oldGrantMap[grantKey(grant)] = grant
+		oldGrantMap[grant.Target] = grant
 	}
 
 	for _, grant := range newGrants {
-		newGrantMap[grantKey(grant)] = grant
+		newGrantMap[grant.Target] = grant
 	}
 
-	for key, existingGrant := range oldGrantMap {
-		if _, found := newGrantMap[key]; !found {
-			grantsToRevoke = append(grantsToRevoke, existingGrant)
+	for target, oldGrant := range oldGrantMap {
+		if newGrant, found := newGrantMap[target]; found {
+			// Compare privileges and determine partial revocation and addition
+			revokePrivileges, addPrivileges := comparePrivileges(oldGrant.Privileges, newGrant.Privileges)
+			if len(revokePrivileges) > 0 {
+				grantsToRevoke = append(grantsToRevoke, mysqlv1alpha1.Grant{
+					Target:     oldGrant.Target,
+					Privileges: revokePrivileges,
+				})
+			}
+			if len(addPrivileges) > 0 {
+				grantsToAdd = append(grantsToAdd, mysqlv1alpha1.Grant{
+					Target:     newGrant.Target,
+					Privileges: addPrivileges,
+				})
+			}
+		} else {
+			grantsToRevoke = append(grantsToRevoke, oldGrant)
 		}
 	}
 
-	for key, inputGrant := range newGrantMap {
-		if _, found := oldGrantMap[key]; !found {
-			grantsToAdd = append(grantsToAdd, inputGrant)
+	for target, newGrant := range newGrantMap {
+		if _, found := oldGrantMap[target]; !found {
+			grantsToAdd = append(grantsToAdd, newGrant)
 		}
 	}
 
 	return grantsToRevoke, grantsToAdd
+}
+
+func comparePrivileges(oldPrivileges, newPrivileges []string) (revokePrivileges, addPrivileges []string) {
+	oldPrivilegeSet := make(map[string]struct{})
+	newPrivilegeSet := make(map[string]struct{})
+
+	for _, priv := range oldPrivileges {
+		oldPrivilegeSet[priv] = struct{}{}
+	}
+
+	for _, priv := range newPrivileges {
+		newPrivilegeSet[priv] = struct{}{}
+	}
+
+	for priv := range oldPrivilegeSet {
+		if _, found := newPrivilegeSet[priv]; !found {
+			revokePrivileges = append(revokePrivileges, priv)
+		}
+	}
+
+	for priv := range newPrivilegeSet {
+		if _, found := oldPrivilegeSet[priv]; !found {
+			addPrivileges = append(addPrivileges, priv)
+		}
+	}
+
+	return revokePrivileges, addPrivileges
 }
 
 func fetchExistingGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) ([]mysqlv1alpha1.Grant, error) {
@@ -549,7 +533,7 @@ func (r *MySQLUserReconciler) revokePrivileges(ctx context.Context, mysqlClient 
 			log.Error(err, "[DorisUserGrant] Revoke failed: %w", err)
 			return err
 		}
-		log.Info("[DorisUserGrant] Revoke", "userIdentity", userIdentity, "grant.Privileges", grant.Privileges, "on", grant.Target)
+		log.Info("[DorisUserGrant] Revoke", "userIdentity", userIdentity, "privileges", grant.Privileges, "target", grant.Target)
 	}
 	return nil
 }
@@ -560,11 +544,11 @@ func (r *MySQLUserReconciler) grantPrivileges(ctx context.Context, mysqlClient *
 	if err != nil {
 		return err
 	}
-	log.Info("[DorisUserGrant] Grant", "userIdentity", userIdentity, "grant.Privileges", grant.Privileges, "on", grant.Target)
+	log.Info("[DorisUserGrant] Grant", "userIdentity", userIdentity, "privileges", grant.Privileges, "target", grant.Target)
 	return nil
 }
 
-func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string, mysqlUserGrants []mysqlv1alpha1.Grant) error {
+func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string, grants []mysqlv1alpha1.Grant) error {
 	// Fetch existing grants
 	existingGrants, fetchErr := fetchExistingGrants(ctx, mysqlClient, userIdentity)
 	if fetchErr != nil {
@@ -572,12 +556,12 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 	}
 
 	// Normalize grants
-	for i := range mysqlUserGrants {
-		mysqlUserGrants[i].Privileges = normalizePerms(mysqlUserGrants[i].Privileges)
+	for i := range grants {
+		grants[i].Privileges = normalizePerms(grants[i].Privileges)
 	}
 
 	// Calculate grants to revoke and grants to add
-	grantsToRevoke, grantsToAdd := calculateGrantDiff(existingGrants, mysqlUserGrants)
+	grantsToRevoke, grantsToAdd := calculateGrantDiff(existingGrants, grants)
 
 	// Revoke obsolete grants
 	revokeErr := r.revokePrivileges(ctx, mysqlClient, userIdentity, grantsToRevoke)
