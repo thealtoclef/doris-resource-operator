@@ -19,7 +19,6 @@ package controllers
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"fmt"
 	"regexp"
 	"sort"
@@ -45,15 +44,16 @@ import (
 )
 
 const (
-	mysqlUserFinalizer                       = "mysqluser.nakamasato.com/finalizer"
-	mysqlUserReasonCompleted                 = "User and Secret are successfully created. Grants are successfully updated."
-	mysqlUserReasonMySQLConnectionFailed     = "Failed to connect to MySQL"
-	mysqlUserReasonMySQLFailedToCreateUser   = "Failed to create User"
-	mysqlUserReasonMySQLFailedToCreateSecret = "Failed to create Secret"
-	mysqlUserReasonMYSQLFailedToGrantPrivs   = "Failed to grant Privileges"
-	mysqlUserReasonMySQLFetchFailed          = "Failed to fetch MySQL"
-	mysqlUserPhaseReady                      = "Ready"
-	mysqlUserPhaseNotReady                   = "NotReady"
+	mysqlUserFinalizer                         = "mysqluser.nakamasato.com/finalizer"
+	mysqlUserReasonCompleted                   = "User and Secret are successfully created. Grants are successfully updated."
+	mysqlUserReasonMySQLConnectionFailed       = "Failed to connect to MySQL"
+	mysqlUserReasonMySQLFailedToCreateUser     = "Failed to create User"
+	mysqlUserReasonMySQLFailedToUpdatePassword = "Failed to update password of User"
+	mysqlUserReasonMySQLFailedToCreateSecret   = "Failed to create Secret"
+	mysqlUserReasonMYSQLFailedToGrantPrivs     = "Failed to grant Privileges"
+	mysqlUserReasonMySQLFetchFailed            = "Failed to fetch MySQL"
+	mysqlUserPhaseReady                        = "Ready"
+	mysqlUserPhaseNotReady                     = "NotReady"
 )
 
 // MySQLUserReconciler reconciles a MySQLUser object
@@ -87,8 +87,8 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "[FetchMySQLUser] Failed")
 		return ctrl.Result{}, err
 	}
-	log.Info("[FetchMySQLUser] Found.", "name", mysqlUser.ObjectMeta.Name, "mysqlUser.Namespace", mysqlUser.Namespace)
-	mysqlUserName := mysqlUser.ObjectMeta.Name
+	log.Info("[FetchMySQLUser] Found.", "name", mysqlUser.Name, "mysqlUser.Namespace", mysqlUser.Namespace)
+	mysqlUserName := mysqlUser.Name
 	mysqlUserHost := mysqlUser.Spec.Host
 	mysqlName := mysqlUser.Spec.MysqlName
 	mysqlUserGrants := mysqlUser.Spec.Grants
@@ -108,7 +108,7 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	log.Info("[FetchMySQL] Found")
 
 	// SetOwnerReference if not exists
-	if !r.ifOwnerReferencesContains(mysqlUser.ObjectMeta.OwnerReferences, mysql) {
+	if !r.ifOwnerReferencesContains(mysqlUser.OwnerReferences, mysql) {
 		err := controllerutil.SetControllerReference(mysql, mysqlUser, r.Scheme)
 		if err != nil {
 			return ctrl.Result{}, err //requeue
@@ -204,12 +204,8 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err // requeue
 		}
 	} else { // exists -> get password from Secret
-		encodedPassword := secret.Data["password"]
-		passwordBytes, err := base64.StdEncoding.DecodeString(string(encodedPassword))
-		if err != nil {
-			log.Error(err, "[password] Failed to decode password from Secret", "secretName", secretName)
-		}
-		password = string(passwordBytes)
+		log.Info("[password] Get password from Secret", "secretName", secretName)
+		password = string(secret.Data["password"])
 	}
 	mysqlUser.Status.SecretCreated = true
 
@@ -217,45 +213,47 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	userIdentity := fmt.Sprintf("'%s'@'%s'", strings.ReplaceAll(mysqlUserName, "-", "_"), mysqlUserHost)
 	_, err = mysqlClient.ExecContext(ctx, fmt.Sprintf("SHOW GRANTS FOR %s", userIdentity))
 	if err != nil {
-		// Create MySQL user if not exists with the password set above.
+		// Create User if not exists with the password set above.
 		_, err = mysqlClient.ExecContext(ctx,
 			fmt.Sprintf("CREATE USER IF NOT EXISTS %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
-			log.Error(err, "[MySQL] Failed to create MySQL user.", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
+			log.Error(err, "[MySQL] Failed to create User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
 			mysqlUser.Status.Phase = mysqlUserPhaseNotReady
 			mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToCreateUser
-			mysqlUser.Status.MySQLUserCreated = false
+			mysqlUser.Status.UserCreated = false
 			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 				log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
 		}
+		log.Info("[MySQL] Created User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
 		metrics.MysqlUserCreatedTotal.Increment() // TODO: increment only when a user is created
 	} else {
-		// Update MySQL user password if exists with the password set above.
+		// Update password of User if already exists with the password set above.
 		_, err = mysqlClient.ExecContext(ctx,
 			fmt.Sprintf("ALTER USER %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
-			log.Error(err, "[MySQL] Failed to update MySQL user password.", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
+			log.Error(err, "[MySQL] Failed to update password of User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
 			mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-			mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToCreateUser
-			mysqlUser.Status.MySQLUserCreated = false
+			mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToUpdatePassword
+			mysqlUser.Status.PasswordUpdated = false
 			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 				log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
 		}
+		log.Info("[MySQL] Updated password of User", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
 	}
-	log.Info("[MySQL] Created or updated", "name", mysqlUserName, "mysqlUser.Namespace", mysqlUser.Namespace)
-	mysqlUser.Status.MySQLUserCreated = true
 	mysqlUser.Status.UserIdentity = userIdentity
+	mysqlUser.Status.UserCreated = true
+	mysqlUser.Status.PasswordUpdated = true
 
 	// Update Grants
 	err = r.updateGrants(ctx, mysqlClient, userIdentity, mysqlUserGrants)
 	if err != nil {
-		log.Error(err, "[MySQL] Failed to update Grants.", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
+		log.Error(err, "[MySQL] Failed to update Grants", "mysqlName", mysqlName, "mysqlUserName", mysqlUserName)
 		mysqlUser.Status.Reason = mysqlUserReasonMYSQLFailedToGrantPrivs
 		if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
@@ -284,8 +282,8 @@ func (r *MySQLUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // finalizeMySQLUser drops MySQL user
 func (r *MySQLUserReconciler) finalizeMySQLUser(ctx context.Context, mysqlClient *sql.DB, mysqlUser *mysqlv1alpha1.MySQLUser) error {
-	if mysqlUser.Status.MySQLUserCreated {
-		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP USER IF EXISTS '%s'@'%s'", mysqlUser.Name, mysqlUser.Spec.Host))
+	if mysqlUser.Status.UserCreated {
+		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP USER IF EXISTS %s", mysqlUser.Status.UserIdentity))
 		if err != nil {
 			return err
 		}
