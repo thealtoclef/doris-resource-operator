@@ -16,7 +16,7 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: true if MySQL user is created
-      jsonPath: .status.mysqlUserCreated
+      jsonPath: .status.userCreated
       name: MySQLUser
       type: boolean
     - description: true if Secret is created
@@ -169,9 +169,9 @@ spec:
                 default: false
                 description: true if Grants are updated
                 type: boolean
-              mysqlUserCreated:
+              passwordUpdated:
                 default: false
-                description: true if User is created
+                description: true if User's password is updated
                 type: boolean
               phase:
                 type: string
@@ -180,6 +180,10 @@ spec:
               secretCreated:
                 default: false
                 description: true if Secret is created
+                type: boolean
+              userCreated:
+                default: false
+                description: true if User is created
                 type: boolean
               userIdentity:
                 description: User identity in format 'username'@'host'

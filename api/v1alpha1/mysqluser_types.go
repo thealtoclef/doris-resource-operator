@@ -62,7 +62,12 @@ type MySQLUserStatus struct {
 	// +kubebuilder:default=false
 
 	// true if User is created
-	MySQLUserCreated bool `json:"mysqlUserCreated,omitempty"`
+	UserCreated bool `json:"userCreated,omitempty"`
+
+	// +kubebuilder:default=false
+
+	// true if User's password is updated
+	PasswordUpdated bool `json:"passwordUpdated,omitempty"`
 
 	// +kubebuilder:default=false
 
@@ -85,7 +90,7 @@ func (m *MySQLUser) SetConditions(conditions []metav1.Condition) {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="MySQLUser",type="boolean",JSONPath=".status.mysqlUserCreated",description="true if MySQL user is created"
+//+kubebuilder:printcolumn:name="MySQLUser",type="boolean",JSONPath=".status.userCreated",description="true if MySQL user is created"
 //+kubebuilder:printcolumn:name="Secret",type="boolean",JSONPath=".status.secretCreated",description="true if Secret is created"
 //+kubebuilder:printcolumn:name="Grants",type="boolean",JSONPath=".status.grantsUpdated",description="true if Grants are updated"
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="The phase of this MySQLUser"
