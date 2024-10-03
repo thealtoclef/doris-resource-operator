@@ -17,29 +17,54 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Grant defines the privileges and the resource for a MySQL user
 type Grant struct {
-	// Privileges for the MySQL user
+
+	// Privileges to grant to the user
 	Privileges []string `json:"privileges"`
 
-	// Resource on which the privileges are applied
+	// Target on which the privileges are applied
 	Target string `json:"target"`
+}
+
+type SecretRef struct {
+
+	// Name of the Secret containing the password
+	Name string `json:"name"`
+
+	// Key in the Secret that contains the password
+	Key string `json:"key"`
 }
 
 // MySQLUserSpec defines the desired state of MySQLUser
 type MySQLUserSpec struct {
 
-	// MySQL (CRD) name to reference to, which decides the destination MySQL server
-	MysqlName string `json:"mysqlName"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Cluster name is immutable"
+
+	// Cluster name to reference to, which decides the destination
+	ClusterName string `json:"clusterName"`
+
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Username is immutable"
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z][a-zA-Z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=64
+
+	// Username
+	Username string `json:"username"`
 
 	// +kubebuilder:default=%
-	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Host is immutable"
+	// +kubebuilder:validation:Pattern=`^(\*|%|[a-zA-Z0-9._-]+|\d{1,3}(\.\d{1,3}){3})$`
 
 	// Host address where the client connects, default to '%'
 	Host string `json:"host"`
+
+	// SecretRef is a reference to a Secret containing the password
+	SecretRef SecretRef `json:"secretRef"`
 
 	// Grants of database user
 	Grants []Grant `json:"grants,omitempty"`
@@ -56,9 +81,6 @@ type MySQLUserStatus struct {
 	Phase      string             `json:"phase,omitempty"`
 	Reason     string             `json:"reason,omitempty"`
 
-	// User identity in format 'username'@'host'
-	UserIdentity string `json:"userIdentity,omitempty"`
-
 	// +kubebuilder:default=false
 
 	// true if User is created
@@ -68,11 +90,6 @@ type MySQLUserStatus struct {
 
 	// true if User's password is updated
 	PasswordUpdated bool `json:"passwordUpdated,omitempty"`
-
-	// +kubebuilder:default=false
-
-	// true if Secret is created
-	SecretCreated bool `json:"secretCreated,omitempty"`
 
 	// +kubebuilder:default=false
 
@@ -103,6 +120,10 @@ type MySQLUser struct {
 
 	Spec   MySQLUserSpec   `json:"spec,omitempty"`
 	Status MySQLUserStatus `json:"status,omitempty"`
+}
+
+func (u MySQLUser) GetUserIdentity() string {
+	return fmt.Sprintf("'%s'@'%s'", u.Spec.Username, u.Spec.Host)
 }
 
 //+kubebuilder:object:root=true

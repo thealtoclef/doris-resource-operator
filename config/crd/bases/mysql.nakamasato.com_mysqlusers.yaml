@@ -60,6 +60,12 @@ spec:
           spec:
             description: MySQLUserSpec defines the desired state of MySQLUser
             properties:
+              clusterName:
+                description: Cluster name to reference to, which decides the destination
+                type: string
+                x-kubernetes-validations:
+                - message: Cluster name is immutable
+                  rule: self == oldSelf
               grants:
                 description: Grants of database user
                 items:
@@ -67,12 +73,12 @@ spec:
                     MySQL user
                   properties:
                     privileges:
-                      description: Privileges for the MySQL user
+                      description: Privileges to grant to the user
                       items:
                         type: string
                       type: array
                     target:
-                      description: Resource on which the privileges are applied
+                      description: Target on which the privileges are applied
                       type: string
                   required:
                   - privileges
@@ -82,13 +88,37 @@ spec:
               host:
                 default: '%'
                 description: Host address where the client connects, default to '%'
+                pattern: ^(\*|%|[a-zA-Z0-9._-]+|\d{1,3}(\.\d{1,3}){3})$
                 type: string
-              mysqlName:
-                description: MySQL (CRD) name to reference to, which decides the destination
-                  MySQL server
+                x-kubernetes-validations:
+                - message: Host is immutable
+                  rule: self == oldSelf
+              secretRef:
+                description: SecretRef is a reference to a Secret containing the password
+                properties:
+                  key:
+                    description: Key in the Secret that contains the password
+                    type: string
+                  name:
+                    description: Name of the Secret containing the password
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+              username:
+                description: Username
+                maxLength: 64
+                pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
                 type: string
+                x-kubernetes-validations:
+                - message: Username is immutable
+                  rule: self == oldSelf
             required:
-            - mysqlName
+            - clusterName
+            - host
+            - secretRef
+            - username
             type: object
           status:
             description: MySQLUserStatus defines the observed state of MySQLUser
@@ -177,17 +207,10 @@ spec:
                 type: string
               reason:
                 type: string
-              secretCreated:
-                default: false
-                description: true if Secret is created
-                type: boolean
               userCreated:
                 default: false
                 description: true if User is created
                 type: boolean
-              userIdentity:
-                description: User identity in format 'username'@'host'
-                type: string
             type: object
         type: object
     served: true
