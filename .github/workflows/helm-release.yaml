@@ -3,10 +3,8 @@ name: Release Helm Chart
 on:
   workflow_dispatch: # for manual testing
   push:
-    branches:
-      - main
-    paths:
-      - "charts/**/*"
+    # Publish semver tags as releases:
+    tags: ["helm-v*.*.*"]
 
 jobs:
   call-helm-release:

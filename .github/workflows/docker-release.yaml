@@ -3,14 +3,11 @@ name: Release Docker Image
 on:
   workflow_dispatch: # for manual testing
   push:
-    branches:
-      - main
+    # Publish semver tags as releases:
+    tags: ["v*.*.*"]
 
 jobs:
   call-docker-release:
     permissions:
-      contents: write
       packages: write
-    uses: thealtoclef/modular-automations/.github/workflows/docker-release.yaml@main
-    with:
-      no_push: false
+    uses: thealtoclef/modular-automations/.github/workflows/docker-release-forked-repo.yaml@main
