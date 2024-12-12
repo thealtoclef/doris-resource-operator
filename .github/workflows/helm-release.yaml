@@ -14,3 +14,5 @@ jobs:
       contents: write
       packages: write
     uses: thealtoclef/modular-automations/.github/workflows/helm-release.yaml@main
+    with:
+      chart_dirs: "helm-charts"
