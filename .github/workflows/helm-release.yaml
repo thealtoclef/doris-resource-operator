@@ -1,0 +1,16 @@
+name: Release Helm Chart
+
+on:
+  workflow_dispatch: # for manual testing
+  push:
+    branches:
+      - main
+    paths:
+      - "charts/**/*"
+
+jobs:
+  call-helm-release:
+    permissions:
+      contents: write
+      packages: write
+    uses: thealtoclef/modular-automations/.github/workflows/helm-release.yaml@main
