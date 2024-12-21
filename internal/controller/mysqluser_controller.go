@@ -290,7 +290,11 @@ type DorisGrant struct {
 	TablePrivs         sql.NullString
 	ColPrivs           sql.NullString
 	ResourcePrivs      sql.NullString
+	CloudClusterPrivs  sql.NullString
+	CloudStagePrivs    sql.NullString
+	StorageVaultPrivs  sql.NullString
 	WorkloadGroupPrivs sql.NullString
+	ComputeGroupPrivs  sql.NullString
 }
 
 type EntityType string
@@ -482,23 +486,66 @@ func fetchExistingGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity 
 	log := log.FromContext(ctx)
 	rows, err := mysqlClient.QueryContext(ctx, fmt.Sprintf("SHOW GRANTS FOR %s;", userIdentity))
 	if err != nil {
-		log.Error(err, "[DorisUserGrant] Show grants failed: %w", err)
+		log.Error(err, "[DorisUserGrant] Show grants failed")
 		return nil, err
 	}
 
 	defer rows.Close()
 
+	columns, err := rows.Columns()
+	if err != nil {
+		log.Error(err, "[DorisUserGrant] Failed to get columns")
+		return nil, err
+	}
+
 	if rows.Next() {
 		var dorisGrant DorisGrant
-		err := rows.Scan(
-			&dorisGrant.UserIdentity, &dorisGrant.Comment, &dorisGrant.Password, &dorisGrant.Roles, &dorisGrant.GlobalPrivs,
-			&dorisGrant.CatalogPrivs, &dorisGrant.DatabasePrivs, &dorisGrant.TablePrivs, &dorisGrant.ColPrivs,
-			&dorisGrant.ResourcePrivs, &dorisGrant.WorkloadGroupPrivs,
-		)
+		var scanArgs []interface{}
+
+		if len(columns) == 11 { // Doris 2
+			scanArgs = []interface{}{
+				&dorisGrant.UserIdentity,
+				&dorisGrant.Comment,
+				&dorisGrant.Password,
+				&dorisGrant.Roles,
+				&dorisGrant.GlobalPrivs,
+				&dorisGrant.CatalogPrivs,
+				&dorisGrant.DatabasePrivs,
+				&dorisGrant.TablePrivs,
+				&dorisGrant.ColPrivs,
+				&dorisGrant.ResourcePrivs,
+				&dorisGrant.WorkloadGroupPrivs,
+			}
+		} else if len(columns) == 15 { // Doris 3
+			scanArgs = []interface{}{
+				&dorisGrant.UserIdentity,
+				&dorisGrant.Comment,
+				&dorisGrant.Password,
+				&dorisGrant.Roles,
+				&dorisGrant.GlobalPrivs,
+				&dorisGrant.CatalogPrivs,
+				&dorisGrant.DatabasePrivs,
+				&dorisGrant.TablePrivs,
+				&dorisGrant.ColPrivs,
+				&dorisGrant.ResourcePrivs,
+				&dorisGrant.CloudClusterPrivs,
+				&dorisGrant.CloudStagePrivs,
+				&dorisGrant.StorageVaultPrivs,
+				&dorisGrant.WorkloadGroupPrivs,
+				&dorisGrant.ComputeGroupPrivs,
+			}
+		} else {
+			log.Error(fmt.Errorf("unexpected number of columns"), "[DorisUserGrant] Unexpected number of columns", "columns", len(columns))
+			return nil, fmt.Errorf("unexpected number of columns: %d", len(columns))
+		}
+
+		err := rows.Scan(scanArgs...)
 		if err != nil {
-			log.Error(err, "[DorisUserGrant] Read row failed: %w", err)
+			log.Error(err, "[DorisUserGrant] Read row failed")
 			return nil, err
 		}
+
+		log.Info("[DorisUserGrant] Scanned row", "dorisGrant", dorisGrant)
 
 		entries := []struct {
 			privs      sql.NullString
@@ -515,7 +562,7 @@ func fetchExistingGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity 
 
 		for _, entry := range entries {
 			if builtGrants, err := buildGrants(entry.privs, entry.entityType); err != nil {
-				log.Error(err, "[DorisUserGrant] Build grants failed: %w", err)
+				log.Error(err, "[DorisUserGrant] Build grants failed")
 				return nil, err
 			} else {
 				grants = append(grants, builtGrants...)
