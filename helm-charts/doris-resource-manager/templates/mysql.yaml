@@ -1,0 +1,14 @@
+apiVersion: mysql.nakamasato.com/v1alpha1
+kind: MySQL
+metadata:
+  name: {{ template "doris-resource-manager.name" . }}
+  namespace: {{ template "doris-resource-manager.namespace" . }}
+spec:
+  host: {{ .Values.host }}
+  port: {{ .Values.port }}
+  adminUser:
+    name: root
+    type: raw
+  adminPassword:
+    name: {{ .Values.rootPasswordFromSecret }}
+    type: k8s

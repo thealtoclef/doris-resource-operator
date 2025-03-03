@@ -1,0 +1,17 @@
+# Default values for doris-resource-manager.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+host: ~
+port: 9030
+rootPasswordFromSecret: ~
+users: []
+# users:
+#   - username: test_user
+#     password: test_password
+#     grants:
+#       - privileges:
+#           [SELECT_PRIV, LOAD_PRIV, ALTER_PRIV, CREATE_PRIV, DROP_PRIV]
+#         target: internal.*.*
+#       - privileges: [USAGE_PRIV]
+#         target: WORKLOAD GROUP 'normal'
