@@ -2,7 +2,7 @@ apiVersion: mysql.nakamasato.com/v1alpha1
 kind: MySQL
 metadata:
   name: {{ template "doris-resource-manager.name" . }}
-  namespace: {{ template "doris-resource-manager.namespace" . }}
+  namespace: {{ .Release.Namespace }}
 spec:
   host: {{ .Values.host }}
   port: {{ .Values.port }}

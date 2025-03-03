@@ -4,7 +4,7 @@ apiVersion: mysql.nakamasato.com/v1alpha1
 kind: MySQLUser
 metadata:
   name: {{ .username | replace "_" "-" }}
-  namespace: {{ template "doris-resource-manager.namespace" $ }}
+  namespace: {{ $.Release.Namespace }}
 spec:
   clusterName: {{ template "doris-resource-manager.name" $ }}
   username: {{ .username }}
