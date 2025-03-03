@@ -33,7 +33,7 @@ func cleanUpMySQL(ctx context.Context, k8sClient client.Client, namespace string
 			return -1
 		}
 		return len(mysqlList.Items)
-	}, 5*time.Second).Should(Equal(0))
+	}, 10*time.Second, 100*time.Millisecond).Should(Equal(0))
 }
 
 func cleanUpMySQLUser(ctx context.Context, k8sClient client.Client, namespace string) {
@@ -46,7 +46,7 @@ func cleanUpMySQLUser(ctx context.Context, k8sClient client.Client, namespace st
 			return -1
 		}
 		return len(mysqlUserList.Items)
-	}).Should(Equal(0))
+	}, 10*time.Second, 100*time.Millisecond).Should(Equal(0))
 }
 
 func cleanUpMySQLDB(ctx context.Context, k8sClient client.Client, namespace string) {
@@ -59,7 +59,7 @@ func cleanUpMySQLDB(ctx context.Context, k8sClient client.Client, namespace stri
 			return -1
 		}
 		return len(mysqlDBList.Items)
-	}).Should(Equal(0))
+	}, 10*time.Second, 100*time.Millisecond).Should(Equal(0))
 }
 
 func cleanUpSecret(ctx context.Context, k8sClient client.Client, namespace string) {
