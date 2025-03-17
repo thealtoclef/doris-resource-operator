@@ -1,0 +1,46 @@
+# Default values for manager.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+host: ~
+port: 9030
+rootPasswordFromSecret: ~
+users: []
+  # - username: test_user
+  #   passwordSecretRef:
+  #     name: user-credentials
+  #     key: test_user
+  #   grants:
+  #     - privileges:
+  #         - SELECT
+  #         - ALTER
+  #         - INSERT
+  #       target: TABLE db1.tbl1
+  #     - privileges:
+  #         - SELECT
+  #       target: ALL TABLES IN DATABASE db1
+  #     - privileges:
+  #         - SELECT
+  #       target: ALL TABLES IN ALL DATABASES
+  #     - privileges:
+  #         - USAGE
+  #       target: RESOURCE 'test_resource'
+
+storageVaults: []
+  # Example S3 Storage Vault
+  # - name: s3_vault
+  #   type: S3
+  #   s3Properties:
+  #     provider: S3  # Options: S3, OSS, COS, OBS, BOS, AZURE, GCP
+  #     endpoint: s3.amazonaws.com
+  #     region: us-east-1
+  #     accessKeySecretRef:
+  #       name: s3-vault-credentials
+  #       key: access_key
+  #     secretKeySecretRef:
+  #       name: s3-vault-credentials
+  #       key: secret_key
+  #     bucket: my-bucket
+  #     rootPath: s3_vault
+  #     usePathStyle: true
+  #   isDefault: true  # Optional: Set this vault as the default storage vault

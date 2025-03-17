@@ -1,0 +1,19 @@
+{{- range .Values.users }}
+---
+apiVersion: mysql.nakamasato.com/v1alpha1
+kind: MySQLUser
+metadata:
+  name: {{ template "doris-resource-manager.fullname" $ }}-{{ .username | replace "_" "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "doris-resource-manager.labels" $ | nindent 4 }}
+spec:
+  clusterName: {{ template "doris-resource-manager.fullname" $ }}
+  username: {{ .username }}
+  passwordSecretRef:
+    name: {{ .passwordSecretRef.name }}
+    key: {{ .passwordSecretRef.key }}
+  {{- with .grants }}
+  grants:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

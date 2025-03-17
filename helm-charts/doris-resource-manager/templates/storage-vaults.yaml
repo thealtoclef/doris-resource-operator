@@ -1,0 +1,18 @@
+{{- range .Values.storageVaults }}
+---
+apiVersion: mysql.nakamasato.com/v1alpha1
+kind: StorageVault
+metadata:
+  name: {{ template "doris-resource-manager.fullname" $ }}-{{ .name | replace "_" "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "doris-resource-manager.labels" $ | nindent 4 }}
+spec:
+  clusterName: {{ template "doris-resource-manager.fullname" $ }}
+  name: {{ .name }}
+  type: {{ .type }}
+  {{- with .s3Properties }}
+  s3Properties:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  isDefault: {{ default false .isDefault }}
+{{- end }}
