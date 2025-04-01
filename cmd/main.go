@@ -150,6 +150,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controllers.StorageVaultReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		MySQLClients: mysqlClients,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "StorageVault")
+		os.Exit(1)
+	}
+
 	// Setup cache indices for resources that reference MySQL clusters.
 	// This enables efficient lookups of resources by ClusterName during reconciliation.
 	cache := mgr.GetCache()
@@ -157,6 +166,12 @@ func main() {
 		return []string{obj.(*mysqlv1alpha1.MySQLUser).Spec.ClusterName}
 	}
 	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.MySQLUser{}, "spec.clusterlName", indexFunc); err != nil {
+		panic(err)
+	}
+	indexFunc = func(obj client.Object) []string {
+		return []string{obj.(*mysqlv1alpha1.StorageVault).Spec.ClusterName}
+	}
+	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.StorageVault{}, "spec.clusterlName", indexFunc); err != nil {
 		panic(err)
 	}
 
