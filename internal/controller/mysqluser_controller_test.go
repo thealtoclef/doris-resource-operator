@@ -406,4 +406,192 @@ var _ = Describe("MySQLUser controller", func() {
 			})
 		})
 	})
+
+	// Tests for calculateGrantDiff function
+	Context("When calculating grant differences", func() {
+		When("specific targets are removed", func() {
+			It("should properly revoke privileges", func() {
+				// Test scenario: User had privileges on multiple workload groups,
+				// but some are removed in the updated grants
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'normal'",
+					},
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'",
+					},
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'", // 'normal' workload group removed
+					},
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke USAGE_PRIV on 'normal' workload group
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("WORKLOAD GROUP 'normal'"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+
+				// No new grants should be added
+				Expect(grantsToAdd).To(BeEmpty())
+			})
+		})
+
+		When("privileges are changed", func() {
+			It("should properly revoke only the removed privileges", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV", "ALTER_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*", // ALTER_PRIV removed
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke only ALTER_PRIV
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("*.*.*"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"ALTER_PRIV"}))
+
+				// No new grants should be added
+				Expect(grantsToAdd).To(BeEmpty())
+			})
+		})
+
+		When("entire target type is removed", func() {
+			It("should properly revoke all privileges of that target type", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'normal'",
+					},
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+					// No workload group privileges
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke USAGE_PRIV on 'normal' workload group
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("WORKLOAD GROUP 'normal'"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+
+				// No new grants should be added
+				Expect(grantsToAdd).To(BeEmpty())
+			})
+		})
+
+		When("new targets are added", func() {
+			It("should correctly add the new grants", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV"},
+						Target:     "*.*.*",
+					},
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'",
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Nothing should be revoked
+				Expect(grantsToRevoke).To(BeEmpty())
+
+				// New workload group privilege should be added
+				Expect(grantsToAdd).To(HaveLen(1))
+				Expect(grantsToAdd[0].Target).To(Equal("WORKLOAD GROUP 'high'"))
+				Expect(grantsToAdd[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+			})
+		})
+
+		When("both additions and revocations are needed", func() {
+			It("should handle both operations correctly", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'normal'",
+					},
+					{
+						Privileges: []string{"SELECT_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*", // Added LOAD_PRIV
+					},
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'", // Changed from 'normal' to 'high'
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke USAGE_PRIV on 'normal' workload group
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("WORKLOAD GROUP 'normal'"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+
+				// Should add LOAD_PRIV on *.*.* and USAGE_PRIV on 'high' workload group
+				Expect(grantsToAdd).To(HaveLen(2))
+
+				// Check if both expected grants are in grantsToAdd
+				foundTable := false
+				foundWorkload := false
+				for _, grant := range grantsToAdd {
+					if grant.Target == "*.*.*" {
+						Expect(grant.Privileges).To(Equal([]string{"LOAD_PRIV"}))
+						foundTable = true
+					} else if grant.Target == "WORKLOAD GROUP 'high'" {
+						Expect(grant.Privileges).To(Equal([]string{"USAGE_PRIV"}))
+						foundWorkload = true
+					}
+				}
+				Expect(foundTable && foundWorkload).To(BeTrue(), "Expected both table and workload group grants")
+			})
+		})
+	})
 })
