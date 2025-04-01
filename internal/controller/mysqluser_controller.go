@@ -181,7 +181,7 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Skip all the following steps if MySQL is being Deleted
 	if !mysql.GetDeletionTimestamp().IsZero() {
 		log.Info("MySQL is being deleted. MySQLUser cannot be created.", "mysql", mysql.Name, "mysqlUser", mysqlUser.Name)
-		return ctrl.Result{}, err
+		return ctrl.Result{}, nil // Return success but skip further reconciliation
 	}
 
 	// Get password from Secret
