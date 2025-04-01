@@ -52,11 +52,6 @@ type MySQLStatus struct {
 
 	// The number of users in this MySQL
 	UserCount int32 `json:"userCount"`
-
-	//+kubebuilder:default=0
-
-	// The number of database in this MySQL
-	DBCount int32 `json:"dbCount"`
 }
 
 //+kubebuilder:object:root=true
@@ -65,7 +60,6 @@ type MySQLStatus struct {
 //+kubebuilder:printcolumn:name="AdminUser",type=string,JSONPath=`.spec.adminUser.name`
 //+kubebuilder:printcolumn:name="Connected",type=boolean,JSONPath=`.status.connected`
 //+kubebuilder:printcolumn:name="UserCount",type="integer",JSONPath=".status.userCount",description="The number of MySQLUsers that belongs to the MySQL"
-//+kubebuilder:printcolumn:name="DBCount",type="integer",JSONPath=".status.dbCount",description="The number of MySQLDBs that belongs to the MySQL"
 //+kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.reason`
 
 // MySQL is the Schema for the mysqls API

@@ -87,19 +87,6 @@ func cleanUpMySQLUser(ctx context.Context, k8sClient client.Client, namespace st
 	}).Should(Equal(0))
 }
 
-func cleanUpMySQLDB(ctx context.Context, k8sClient client.Client, namespace string) {
-	err := k8sClient.DeleteAllOf(ctx, &mysqlv1alpha1.MySQLDB{}, client.InNamespace(namespace))
-	Expect(err).NotTo(HaveOccurred())
-	mysqlDBList := &mysqlv1alpha1.MySQLDBList{}
-	Eventually(func() int {
-		err := k8sClient.List(ctx, mysqlDBList, &client.ListOptions{})
-		if err != nil {
-			return -1
-		}
-		return len(mysqlDBList.Items)
-	}).Should(Equal(0))
-}
-
 func cleanUpSecret(ctx context.Context, k8sClient client.Client, namespace string) {
 	err := k8sClient.DeleteAllOf(ctx, &v1.Secret{}, client.InNamespace(namespace))
 	Expect(err).NotTo(HaveOccurred())
@@ -113,17 +100,6 @@ func newMySQLUser(apiVersion, namespace, name, mysqlName string) *mysqlv1alpha1.
 			Name:      name,
 		},
 		Spec: mysqlv1alpha1.MySQLUserSpec{ClusterName: mysqlName},
-	}
-}
-
-func newMySQLDB(apiVersion, namespace, objName, dbName, mysqlName string) *mysqlv1alpha1.MySQLDB {
-	return &mysqlv1alpha1.MySQLDB{
-		TypeMeta: metav1.TypeMeta{APIVersion: apiVersion, Kind: "MySQLDB"},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: namespace,
-			Name:      objName,
-		},
-		Spec: mysqlv1alpha1.MySQLDBSpec{ClusterName: mysqlName, DBName: dbName},
 	}
 }
 

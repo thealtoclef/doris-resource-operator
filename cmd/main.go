@@ -149,14 +149,6 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "MySQL")
 		os.Exit(1)
 	}
-	if err = (&controllers.MySQLDBReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		MySQLClients: mysqlClients,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "MySQLDB")
-		os.Exit(1)
-	}
 
 	// Set index for mysqluser with spec.mysqlName
 	// this is necessary to get MySQLUser/MySQLDB that references a MySQL
@@ -165,12 +157,6 @@ func main() {
 		return []string{obj.(*mysqlv1alpha1.MySQLUser).Spec.ClusterName}
 	}
 	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.MySQLUser{}, "spec.mysqlName", indexFunc); err != nil {
-		panic(err)
-	}
-	indexFunc = func(obj client.Object) []string {
-		return []string{obj.(*mysqlv1alpha1.MySQLDB).Spec.ClusterName}
-	}
-	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.MySQLDB{}, "spec.mysqlName", indexFunc); err != nil {
 		panic(err)
 	}
 
