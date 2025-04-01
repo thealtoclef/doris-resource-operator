@@ -30,12 +30,12 @@ var _ = Describe("MySQL controller", func() {
 		})
 		Expect(err).ToNot(HaveOccurred())
 
-		// set index for mysqluser with spec.mysqlName
+		// set index for mysqluser with spec.clusterlName
 		cache := k8sManager.GetCache()
 		indexFunc := func(obj client.Object) []string {
 			return []string{obj.(*mysqlv1alpha1.MySQLUser).Spec.ClusterName}
 		}
-		if err := cache.IndexField(ctx, &mysqlv1alpha1.MySQLUser{}, "spec.mysqlName", indexFunc); err != nil {
+		if err := cache.IndexField(ctx, &mysqlv1alpha1.MySQLUser{}, "spec.clusterlName", indexFunc); err != nil {
 			panic(err)
 		}
 

@@ -150,13 +150,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Set index for mysqluser with spec.mysqlName
-	// this is necessary to get MySQLUser/MySQLDB that references a MySQL
+	// Setup cache indices for resources that reference MySQL clusters.
+	// This enables efficient lookups of resources by ClusterName during reconciliation.
 	cache := mgr.GetCache()
 	indexFunc := func(obj client.Object) []string {
 		return []string{obj.(*mysqlv1alpha1.MySQLUser).Spec.ClusterName}
 	}
-	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.MySQLUser{}, "spec.mysqlName", indexFunc); err != nil {
+	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.MySQLUser{}, "spec.clusterlName", indexFunc); err != nil {
 		panic(err)
 	}
 
