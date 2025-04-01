@@ -73,3 +73,29 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - storagevaults
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - storagevaults/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - storagevaults/status
+  verbs:
+  - get
+  - patch
+  - update

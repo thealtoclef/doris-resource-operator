@@ -33,8 +33,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	_ "github.com/go-sql-driver/mysql"
+	errors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
+	metrics "github.com/nakamasato/mysql-operator/internal/metrics"
 	mysqlinternal "github.com/nakamasato/mysql-operator/internal/mysql"
 )
 
@@ -48,6 +51,7 @@ const (
 	storageVaultPhaseReady                  = "Ready"
 	storageVaultPhaseNotReady               = "NotReady"
 	storageVaultReasonFailedToFinalize      = "Failed to finalize storage vault"
+	storageVaultReasonMySQLFetchFailed      = "Failed to fetch cluster"
 )
 
 // StorageVaultReconciler reconciles a StorageVault object
@@ -66,6 +70,12 @@ func NewStorageVaultReconciler(client client.Client, scheme *runtime.Scheme, mys
 	}
 }
 
+//+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=storagevaults,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=storagevaults/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=storagevaults/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
+//+kubebuilder:rbac:groups=core,resources=events,verbs=create;update;patch
+
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -75,39 +85,64 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	storageVault := &mysqlv1alpha1.StorageVault{}
 	err := r.Get(ctx, req.NamespacedName, storageVault)
 	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			log.Info("Not found", "req.NamespacedName", req.NamespacedName)
+		if errors.IsNotFound(err) {
+			log.Info("[FetchStorageVault] Not found", "req.NamespacedName", req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Failed to fetch StorageVault")
+
+		log.Error(err, "[FetchStorageVault] Failed")
 		return ctrl.Result{}, err
 	}
-	log.Info("Found", "name", storageVault.Name, "namespace", storageVault.Namespace)
+	log.Info("[FetchStorageVault] Found", "name", storageVault.Name, "namespace", storageVault.Namespace)
+	clusterName := storageVault.Spec.ClusterName
 
-	// Get MySQL cluster
+	// Fetch MySQL
 	mysql := &mysqlv1alpha1.MySQL{}
-	err = r.Get(ctx, types.NamespacedName{
-		Namespace: req.Namespace,
-		Name:      storageVault.Spec.ClusterName,
-	}, mysql)
-	if err != nil {
-		log.Error(err, "Failed to fetch MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
+	var mysqlNamespacedName = client.ObjectKey{Namespace: req.Namespace, Name: clusterName}
+	if err := r.Get(ctx, mysqlNamespacedName, mysql); err != nil {
+		log.Error(err, "[FetchMySQL] Failed")
 		storageVault.Status.Phase = storageVaultPhaseNotReady
-		storageVault.Status.Reason = storageVaultReasonMySQLConnectionFailed
+		storageVault.Status.Reason = storageVaultReasonMySQLFetchFailed
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
 			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
-			return ctrl.Result{RequeueAfter: time.Second}, nil
+			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	log.Info("Found MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
+	log.Info("[FetchMySQL] Found")
+
+	// SetOwnerReference if not exists
+	if !r.ifOwnerReferencesContains(storageVault.OwnerReferences, mysql) {
+		err := controllerutil.SetControllerReference(mysql, storageVault, r.Scheme)
+		if err != nil {
+			return ctrl.Result{}, err // requeue
+		}
+		err = r.Update(ctx, storageVault)
+		if err != nil {
+			return ctrl.Result{}, err // requeue
+		}
+	}
+
+	// Get MySQL client
+	mysqlClient, err := r.MySQLClients.GetClient(mysql.GetKey())
+	if err != nil {
+		storageVault.Status.Phase = storageVaultPhaseNotReady
+		storageVault.Status.Reason = storageVaultReasonMySQLConnectionFailed
+		log.Error(err, "[MySQLClient] Failed to connect to cluster", "key", mysql.GetKey(), "clusterName", clusterName)
+		if serr := r.Status().Update(ctx, storageVault); serr != nil {
+			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
+			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
+		}
+		return ctrl.Result{}, err // requeue
+	}
+	log.Info("[MySQLClient] Successfully connected")
 
 	// Finalize if DeletionTimestamp exists
 	if !storageVault.GetDeletionTimestamp().IsZero() {
 		log.Info("Resource marked for deletion")
 		if controllerutil.ContainsFinalizer(storageVault, storageVaultFinalizer) {
 			// Run finalization logic for storageVaultFinalizer
-			if err := r.finalizeStorageVault(ctx, storageVault); err != nil {
+			if err := r.finalizeStorageVault(ctx, mysqlClient, storageVault); err != nil {
 				log.Error(err, "Failed to finalize StorageVault")
 				storageVault.Status.Phase = storageVaultPhaseNotReady
 				storageVault.Status.Reason = storageVaultReasonFailedToFinalize
@@ -130,37 +165,83 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, nil // Return success when not having the finalizer
+		return ctrl.Result{}, nil // should return success when not having the finalizer
 	}
 
 	// Add finalizer if not exists
+	log.Info("Add Finalizer for this CR")
 	if controllerutil.AddFinalizer(storageVault, storageVaultFinalizer) {
 		log.Info("Added Finalizer")
 		err = r.Update(ctx, storageVault)
 		if err != nil {
-			log.Error(err, "Failed to update after adding finalizer")
-			return ctrl.Result{}, err
+			log.Info("Failed to update after adding finalizer")
+			return ctrl.Result{}, err // requeue
 		}
 		log.Info("Updated successfully after adding finalizer")
+	} else {
+		log.Info("already has finalizer")
 	}
 
 	// Skip if MySQL is being deleted
 	if !mysql.GetDeletionTimestamp().IsZero() {
 		log.Info("MySQL is being deleted. StorageVault cannot be created.", "mysql", mysql.Name, "storageVault", storageVault.Name)
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, nil // Return success but skip further reconciliation
 	}
 
-	// Reconcile storage vault
-	result, err := r.reconcileStorageVault(ctx, storageVault)
+	// Check if storage vault exists
+	exists, err := r.storageVaultExists(ctx, mysqlClient, storageVault.Spec.Name)
 	if err != nil {
-		log.Error(err, "Failed to reconcile storage vault", "name", storageVault.Name)
+		log.Error(err, "[StorageVault] Failed to check if storage vault exists", "clusterName", clusterName, "storageVaultName", storageVault.Spec.Name)
 		storageVault.Status.Phase = storageVaultPhaseNotReady
 		storageVault.Status.Reason = storageVaultReasonFailedToCreateVault
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
 			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		return result, err
+		return ctrl.Result{}, err // requeue
+	}
+
+	if !exists {
+		// Create storage vault if not exists
+		if err := r.createStorageVault(ctx, mysqlClient, storageVault); err != nil {
+			log.Error(err, "Failed to create storage vault")
+			storageVault.Status.Phase = storageVaultPhaseNotReady
+			storageVault.Status.Reason = storageVaultReasonFailedToCreateVault
+			if serr := r.Status().Update(ctx, storageVault); serr != nil {
+				log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
+				return ctrl.Result{RequeueAfter: time.Second}, nil
+			}
+			return ctrl.Result{}, err // requeue
+		}
+		log.Info("Created storage vault successfully")
+		storageVault.Status.VaultCreated = true
+		metrics.StorageVaultCreatedTotal.Increment()
+	} else {
+		storageVault.Status.VaultCreated = true
+		// Update storage vault if exists
+		if err := r.updateStorageVault(ctx, mysqlClient, storageVault); err != nil {
+			log.Error(err, "Failed to update storage vault")
+			storageVault.Status.Phase = storageVaultPhaseNotReady
+			storageVault.Status.Reason = storageVaultReasonFailedToCreateVault
+			if serr := r.Status().Update(ctx, storageVault); serr != nil {
+				log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
+				return ctrl.Result{RequeueAfter: time.Second}, nil
+			}
+			return ctrl.Result{}, err // requeue
+		}
+		log.Info("Updated storage vault successfully")
+	}
+
+	// Handle default vault setting
+	if err := r.handleDefaultVault(ctx, mysqlClient, storageVault); err != nil {
+		log.Error(err, "Failed to handle default storage vault")
+		storageVault.Status.Phase = storageVaultPhaseNotReady
+		storageVault.Status.Reason = storageVaultReasonFailedToCreateVault
+		if serr := r.Status().Update(ctx, storageVault); serr != nil {
+			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
+		return ctrl.Result{}, err // requeue
 	}
 
 	// Update status
@@ -168,10 +249,10 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	storageVault.Status.Reason = storageVaultReasonCompleted
 	if serr := r.Status().Update(ctx, storageVault); serr != nil {
 		log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
-	log.Info("Successfully reconciled", "name", storageVault.Name)
 
-	return result, nil
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -182,107 +263,17 @@ func (r *StorageVaultReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // finalizeStorageVault drops the storage vault from Doris
-func (r *StorageVaultReconciler) finalizeStorageVault(ctx context.Context, storageVault *mysqlv1alpha1.StorageVault) error {
+func (r *StorageVaultReconciler) finalizeStorageVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault) error {
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
+	log.Info("Finalization requested")
 
 	if !storageVault.Status.VaultCreated {
 		log.Info("Storage vault was not created, skipping finalization")
 		return nil
 	}
 
-	// Get MySQL cluster
-	mysql := &mysqlv1alpha1.MySQL{}
-	err := r.Get(ctx, types.NamespacedName{
-		Namespace: storageVault.Namespace,
-		Name:      storageVault.Spec.ClusterName,
-	}, mysql)
-	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			log.Info("MySQL cluster not found, cannot drop storage vault", "clusterName", storageVault.Spec.ClusterName)
-			return nil
-		}
-		return fmt.Errorf("failed to get MySQL cluster: %w", err)
-	}
-
-	// Get MySQL client
-	mysqlClient, err := r.MySQLClients.GetClient(mysql.GetKey())
-	if err != nil {
-		log.Error(err, "Failed to get MySQL client", "key", mysql.GetKey())
-		return fmt.Errorf("failed to get MySQL client: %w", err)
-	}
-
-	// Attempt to drop the storage vault
-	log.Info("Dropping storage vault")
-	_, err = mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP STORAGE VAULT IF EXISTS '%s'", storageVault.Spec.Name))
-	if err != nil {
-		log.Error(err, "Failed to drop storage vault")
-		return fmt.Errorf("failed to drop storage vault: %w", err)
-	}
-
-	log.Info("Successfully dropped storage vault")
-	return nil
-}
-
-// reconcileStorageVault reconciles the storage vault
-func (r *StorageVaultReconciler) reconcileStorageVault(ctx context.Context, storageVault *mysqlv1alpha1.StorageVault) (ctrl.Result, error) {
-	log := log.FromContext(ctx).WithName("StorageVaultReconciler")
-
-	// Get the MySQL cluster
-	mysql := &mysqlv1alpha1.MySQL{}
-	if err := r.Get(ctx, types.NamespacedName{
-		Namespace: storageVault.Namespace,
-		Name:      storageVault.Spec.ClusterName,
-	}, mysql); err != nil {
-		log.Error(err, "Failed to get MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
-		return ctrl.Result{}, fmt.Errorf("failed to get MySQL cluster: %w", err)
-	}
-
-	// Get MySQL client from MySQLClients
-	mysqlClient, err := r.MySQLClients.GetClient(mysql.GetKey())
-	if err != nil {
-		log.Error(err, "Failed to get MySQL client", "key", mysql.GetKey(), "clusterName", storageVault.Spec.ClusterName)
-		return ctrl.Result{}, fmt.Errorf("failed to get MySQL client: %w", err)
-	}
-	log.Info("Successfully connected to MySQL client")
-
-	// Check if storage vault exists
-	exists, err := r.storageVaultExists(ctx, mysqlClient, storageVault.Spec.Name)
-	if err != nil {
-		log.Error(err, "Failed to check if storage vault exists")
-		return ctrl.Result{}, fmt.Errorf("failed to check if storage vault exists: %w", err)
-	}
-
-	if !exists {
-		// Create storage vault if not exists
-		if err := r.createStorageVault(ctx, mysqlClient, storageVault); err != nil {
-			log.Error(err, "Failed to create storage vault")
-			return ctrl.Result{}, fmt.Errorf("failed to create storage vault: %w", err)
-		}
-		log.Info("Created storage vault successfully")
-		storageVault.Status.VaultCreated = true
-	} else {
-		storageVault.Status.VaultCreated = true
-		// Update storage vault if exists
-		if err := r.updateStorageVault(ctx, mysqlClient, storageVault); err != nil {
-			log.Error(err, "Failed to update storage vault")
-			return ctrl.Result{}, fmt.Errorf("failed to update storage vault: %w", err)
-		}
-		log.Info("Updated storage vault successfully")
-	}
-
-	// Handle default vault setting
-	if err := r.handleDefaultVault(ctx, mysqlClient, storageVault); err != nil {
-		log.Error(err, "Failed to handle default storage vault")
-		return ctrl.Result{}, fmt.Errorf("failed to handle default storage vault: %w", err)
-	}
-
-	// Update status
-	if err := r.Status().Update(ctx, storageVault); err != nil {
-		log.Error(err, "Failed to update storage vault status")
-		return ctrl.Result{}, fmt.Errorf("failed to update storage vault status: %w", err)
-	}
-
-	return ctrl.Result{}, nil
+	// StorageVault deletion is not currently supported
+	return fmt.Errorf("storage vault deletion is not currently supported")
 }
 
 // storageVaultExists checks if a storage vault exists
@@ -533,4 +524,14 @@ func (r *StorageVaultReconciler) handleDefaultVault(ctx context.Context, db *sql
 	}
 
 	return nil
+}
+
+// ifOwnerReferencesContains checks if the ownerReferences contains the MySQL object
+func (r *StorageVaultReconciler) ifOwnerReferencesContains(ownerReferences []metav1.OwnerReference, mysql *mysqlv1alpha1.MySQL) bool {
+	for _, ref := range ownerReferences {
+		if ref.APIVersion == "mysql.nakamasato.com/v1alpha1" && ref.Kind == "MySQL" && ref.UID == mysql.UID {
+			return true
+		}
+	}
+	return false
 }

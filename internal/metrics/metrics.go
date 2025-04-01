@@ -11,7 +11,16 @@ type MysqlUserTotalAdaptor struct {
 	metric prometheus.Counter
 }
 
+// StorageVaultTotalAdaptor is a wrapper for prometheus Counter metrics
+type StorageVaultTotalAdaptor struct {
+	metric prometheus.Counter
+}
+
 func (m MysqlUserTotalAdaptor) Increment() {
+	m.metric.Inc()
+}
+
+func (m StorageVaultTotalAdaptor) Increment() {
 	m.metric.Inc()
 }
 
@@ -32,8 +41,27 @@ var (
 		},
 	)
 
+	storageVaultCreatedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: MetricsNamespace,
+			Name:      "storage_vault_created_total",
+			Help:      "Number of created Storage Vaults",
+		},
+	)
+
+	storageVaultDeletedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: MetricsNamespace,
+			Name:      "storage_vault_deleted_total",
+			Help:      "Number of deleted Storage Vaults",
+		},
+	)
+
 	MysqlUserCreatedTotal *MysqlUserTotalAdaptor = &MysqlUserTotalAdaptor{metric: userCreatedTotal}
 	MysqlUserDeletedTotal *MysqlUserTotalAdaptor = &MysqlUserTotalAdaptor{metric: mysqlUserDeletedTotal}
+
+	StorageVaultCreatedTotal *StorageVaultTotalAdaptor = &StorageVaultTotalAdaptor{metric: storageVaultCreatedTotal}
+	StorageVaultDeletedTotal *StorageVaultTotalAdaptor = &StorageVaultTotalAdaptor{metric: storageVaultDeletedTotal}
 )
 
 func init() {
@@ -41,5 +69,7 @@ func init() {
 	metrics.Registry.MustRegister(
 		userCreatedTotal,
 		mysqlUserDeletedTotal,
+		storageVaultCreatedTotal,
+		storageVaultDeletedTotal,
 	)
 }
