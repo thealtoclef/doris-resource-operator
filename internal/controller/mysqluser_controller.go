@@ -612,8 +612,6 @@ func comparePrivileges(oldPrivileges, newPrivileges []string) (revokePrivileges,
 func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRevoke, grantsToAdd []mysqlv1alpha1.Grant) {
 	oldGrantMap := make(map[string]mysqlv1alpha1.Grant)
 	newGrantMap := make(map[string]mysqlv1alpha1.Grant)
-	// Track privilege types present in the new grants
-	newPrivilegeTargetTypes := make(map[TargetType]bool)
 
 	for _, grant := range oldGrants {
 		oldGrantMap[grant.Target] = grant
@@ -621,9 +619,6 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 
 	for _, grant := range newGrants {
 		newGrantMap[grant.Target] = grant
-		// Extract target type using the centralized function
-		targetType := ParseTargetType(grant.Target)
-		newPrivilegeTargetTypes[targetType] = true
 	}
 
 	for target, oldGrant := range oldGrantMap {
@@ -643,14 +638,8 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 				})
 			}
 		} else {
-			// Check if the target type of this old grant is completely absent from new grants
-			oldTargetType := ParseTargetType(oldGrant.Target)
-
-			// If this target type is completely absent from new grants, or the specific target is not in new grants,
-			// revoke it completely
-			if !newPrivilegeTargetTypes[oldTargetType] || !found {
-				grantsToRevoke = append(grantsToRevoke, oldGrant)
-			}
+			// If the target doesn't exist in new grants, revoke it completely
+			grantsToRevoke = append(grantsToRevoke, oldGrant)
 		}
 	}
 
