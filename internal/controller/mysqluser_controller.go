@@ -20,7 +20,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -500,11 +499,10 @@ func buildGrants(privs sql.NullString, targetType TargetType) ([]mysqlv1alpha1.G
 }
 
 func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) ([]mysqlv1alpha1.Grant, error) {
-	var grants []mysqlv1alpha1.Grant
-
 	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("FetchGrants").WithValues("userIdentity", userIdentity)
-	log.Info("Fetching", "userIdentity", userIdentity)
 
+	// Fetch grants for the user
+	var grants []mysqlv1alpha1.Grant
 	rows, err := mysqlClient.QueryContext(ctx, fmt.Sprintf("SHOW GRANTS FOR %s;", userIdentity))
 	if err != nil {
 		log.Error(err, "Show grants failed")
@@ -518,7 +516,6 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 		log.Error(err, "Get columns failed")
 		return nil, err
 	}
-	log.Info("Got columns", "columns", columns)
 
 	if rows.Next() {
 		var grant DBGrant
@@ -562,7 +559,6 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 						log.Error(err, "Build grants failed", "privilegeType", privType, "value", priv)
 						return nil, err
 					} else {
-						log.Info("Built grants", "privilegeType", privType, "count", len(builtGrants), "grants", builtGrants)
 						grants = append(grants, builtGrants...)
 					}
 				}
@@ -572,7 +568,6 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 
 	// Normalize all grants' targets to ensure consistent comparison
 	for i := range grants {
-		originalTarget := grants[i].Target
 		// Ensure table targets follow a consistent format
 		if ParseTargetType(grants[i].Target) == TableTarget {
 			parts := strings.Split(grants[i].Target, ".")
@@ -581,16 +576,9 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 			}
 			grants[i].Target = strings.Join(parts, ".")
 		}
-		if originalTarget != grants[i].Target {
-			log.Info("Normalized target", "original", originalTarget, "normalized", grants[i].Target)
-		}
 
 		// Normalize privileges
-		originalPrivs := grants[i].Privileges
 		grants[i].Privileges = normalizePerms(grants[i].Privileges)
-		if !reflect.DeepEqual(originalPrivs, grants[i].Privileges) {
-			log.Info("Normalized privileges", "original", originalPrivs, "normalized", grants[i].Privileges)
-		}
 	}
 
 	log.Info("Fetched grants", "count", len(grants), "grants", grants)
@@ -599,6 +587,8 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 
 func (r *MySQLUserReconciler) grantPrivileges(ctx context.Context, mysqlClient *sql.DB, userIdentity string, grant mysqlv1alpha1.Grant) error {
 	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("GrantPrivileges").WithValues("userIdentity", userIdentity)
+
+	// Grant privileges to the user
 	_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("GRANT %s ON %s TO %s;", strings.Join(grant.Privileges, ","), grant.Target, userIdentity))
 
 	if err != nil {
@@ -611,6 +601,8 @@ func (r *MySQLUserReconciler) grantPrivileges(ctx context.Context, mysqlClient *
 
 func (r *MySQLUserReconciler) revokePrivileges(ctx context.Context, mysqlClient *sql.DB, userIdentity string, grants []mysqlv1alpha1.Grant) error {
 	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("RevokePrivileges").WithValues("userIdentity", userIdentity)
+
+	// Revoke privileges from the user
 	for _, grant := range grants {
 		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("REVOKE %s ON %s FROM %s;", strings.Join(grant.Privileges, ","), grant.Target, userIdentity))
 		if err != nil {
@@ -731,7 +723,6 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 	}
 
 	// Calculate grants to revoke and grants to add
-	log.Info("Calculating grant differences")
 	grantsToRevoke, grantsToAdd := calculateGrantDiff(existingGrants, grants)
 	log.Info("Grants to revoke", "count", len(grantsToRevoke), "grants", grantsToRevoke)
 	log.Info("Grants to add", "count", len(grantsToAdd), "grants", grantsToAdd)
