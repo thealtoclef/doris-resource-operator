@@ -289,15 +289,36 @@ func (r *StorageVaultReconciler) reconcileStorageVault(ctx context.Context, stor
 func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql.DB, name string) (bool, error) {
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler")
 	log.Info("[StorageVault] Checking if storage vault exists", "name", name)
-	_, err := db.ExecContext(ctx, fmt.Sprintf("SHOW STORAGE VAULT '%s'", name))
+
+	// Execute SHOW STORAGE VAULTS to get all vaults
+	rows, err := db.QueryContext(ctx, "SHOW STORAGE VAULTS")
 	if err != nil {
-		if strings.Contains(err.Error(), "doesn't exist") {
-			log.Info("[StorageVault] Storage vault does not exist", "name", name)
-			return false, nil
-		}
 		return false, err
 	}
-	return true, nil
+	defer rows.Close()
+
+	// Check if our vault exists in the results
+	exists := false
+	for rows.Next() {
+		var vaultName string
+		var properties string
+		if err := rows.Scan(&vaultName, &properties); err != nil {
+			return false, err
+		}
+		if vaultName == name {
+			exists = true
+			break
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+
+	if !exists {
+		log.Info("[StorageVault] Storage vault does not exist", "name", name)
+	}
+	return exists, nil
 }
 
 // createStorageVault creates a new storage vault in Doris
