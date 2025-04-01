@@ -703,23 +703,40 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string, grants []mysqlv1alpha1.Grant) error {
 	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("UpdateGrants").WithValues("userIdentity", userIdentity)
 
-	// Fetch grants
+	// Validate table targets - they must have exactly 3 parts (catalog.database.table)
+	for _, grant := range grants {
+		targetType := ParseTargetType(grant.Target)
+		if targetType == TableTarget {
+			parts := strings.Split(grant.Target, ".")
+			if len(parts) != 3 {
+				errMsg := fmt.Sprintf("Invalid table target format '%s'. Table targets must have exactly 3 parts in the form 'catalog.database.table'", grant.Target)
+				log.Error(nil, errMsg)
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			// Check that none of the parts are empty
+			for j, part := range parts {
+				if strings.TrimSpace(part) == "" {
+					partNames := []string{"catalog", "database", "table"}
+					errMsg := fmt.Sprintf("Invalid table target format '%s'. The %s part cannot be empty",
+						grant.Target, partNames[j])
+					log.Error(nil, errMsg)
+					return fmt.Errorf("%s", errMsg)
+				}
+			}
+		}
+	}
+
+	// Fetch existing grants
 	existingGrants, fetchErr := r.fetchGrants(ctx, mysqlClient, userIdentity)
 	if fetchErr != nil {
 		log.Error(fetchErr, "Failed to fetch grants")
 		return fetchErr
 	}
-	log.Info("Existing grants", "count", len(existingGrants), "grants", existingGrants)
 
 	// Normalize grants
-	log.Info("Normalizing desired grants", "count", len(grants))
 	for i := range grants {
-		originalPrivs := grants[i].Privileges
 		grants[i].Privileges = normalizePerms(grants[i].Privileges)
-		log.Info("Normalized grant privileges",
-			"target", grants[i].Target,
-			"before", originalPrivs,
-			"after", grants[i].Privileges)
 	}
 
 	// Calculate grants to revoke and grants to add
