@@ -76,13 +76,13 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err := r.Get(ctx, req.NamespacedName, storageVault)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			log.Info("[StorageVault] Not found", "req.NamespacedName", req.NamespacedName)
+			log.Info("Not found", "req.NamespacedName", req.NamespacedName)
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "[StorageVault] Failed to fetch StorageVault")
+		log.Error(err, "Failed to fetch StorageVault")
 		return ctrl.Result{}, err
 	}
-	log.Info("[StorageVault] Found", "name", storageVault.Name, "namespace", storageVault.Namespace)
+	log.Info("Found", "name", storageVault.Name, "namespace", storageVault.Namespace)
 
 	// Get MySQL cluster
 	mysql := &mysqlv1alpha1.MySQL{}
@@ -91,42 +91,42 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		Name:      storageVault.Spec.ClusterName,
 	}, mysql)
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to fetch MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
+		log.Error(err, "Failed to fetch MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
 		storageVault.Status.Phase = storageVaultPhaseNotReady
 		storageVault.Status.Reason = storageVaultReasonMySQLConnectionFailed
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
-			log.Error(serr, "[StorageVault] Failed to update StorageVault status", "storageVault", storageVault.Name)
+			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	log.Info("[StorageVault] Found MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
+	log.Info("Found MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
 
 	// Finalize if DeletionTimestamp exists
 	if !storageVault.GetDeletionTimestamp().IsZero() {
-		log.Info("[StorageVault] Resource marked for deletion")
+		log.Info("Resource marked for deletion")
 		if controllerutil.ContainsFinalizer(storageVault, storageVaultFinalizer) {
 			// Run finalization logic for storageVaultFinalizer
 			if err := r.finalizeStorageVault(ctx, storageVault); err != nil {
-				log.Error(err, "[StorageVault] Failed to finalize StorageVault")
+				log.Error(err, "Failed to finalize StorageVault")
 				storageVault.Status.Phase = storageVaultPhaseNotReady
 				storageVault.Status.Reason = storageVaultReasonFailedToFinalize
 				if serr := r.Status().Update(ctx, storageVault); serr != nil {
-					log.Error(serr, "[StorageVault] Failed to update StorageVault status", "storageVault", storageVault.Name)
+					log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 				}
 				return ctrl.Result{}, err
 			}
-			log.Info("[StorageVault] Finalization completed")
+			log.Info("Finalization completed")
 
 			// Remove finalizer
 			if controllerutil.RemoveFinalizer(storageVault, storageVaultFinalizer) {
-				log.Info("[StorageVault] Removing finalizer")
+				log.Info("Removing finalizer")
 				err := r.Update(ctx, storageVault)
 				if err != nil {
-					log.Error(err, "[StorageVault] Failed to remove finalizer")
+					log.Error(err, "Failed to remove finalizer")
 					return ctrl.Result{}, err
 				}
-				log.Info("[StorageVault] Finalizer removed")
+				log.Info("Finalizer removed")
 			}
 			return ctrl.Result{}, nil
 		}
@@ -135,29 +135,29 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Add finalizer if not exists
 	if controllerutil.AddFinalizer(storageVault, storageVaultFinalizer) {
-		log.Info("[StorageVault] Added Finalizer")
+		log.Info("Added Finalizer")
 		err = r.Update(ctx, storageVault)
 		if err != nil {
-			log.Error(err, "[StorageVault] Failed to update after adding finalizer")
+			log.Error(err, "Failed to update after adding finalizer")
 			return ctrl.Result{}, err
 		}
-		log.Info("[StorageVault] Updated successfully after adding finalizer")
+		log.Info("Updated successfully after adding finalizer")
 	}
 
 	// Skip if MySQL is being deleted
 	if !mysql.GetDeletionTimestamp().IsZero() {
-		log.Info("[StorageVault] MySQL is being deleted. StorageVault cannot be created.", "mysql", mysql.Name, "storageVault", storageVault.Name)
+		log.Info("MySQL is being deleted. StorageVault cannot be created.", "mysql", mysql.Name, "storageVault", storageVault.Name)
 		return ctrl.Result{}, nil
 	}
 
 	// Reconcile storage vault
 	result, err := r.reconcileStorageVault(ctx, storageVault)
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to reconcile storage vault", "name", storageVault.Name)
+		log.Error(err, "Failed to reconcile storage vault", "name", storageVault.Name)
 		storageVault.Status.Phase = storageVaultPhaseNotReady
 		storageVault.Status.Reason = storageVaultReasonFailedToCreateVault
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
-			log.Error(serr, "[StorageVault] Failed to update StorageVault status", "storageVault", storageVault.Name)
+			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		return result, err
@@ -167,9 +167,9 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	storageVault.Status.Phase = storageVaultPhaseReady
 	storageVault.Status.Reason = storageVaultReasonCompleted
 	if serr := r.Status().Update(ctx, storageVault); serr != nil {
-		log.Error(serr, "[StorageVault] Failed to update StorageVault status", "storageVault", storageVault.Name)
+		log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 	}
-	log.Info("[StorageVault] Successfully reconciled", "name", storageVault.Name)
+	log.Info("Successfully reconciled", "name", storageVault.Name)
 
 	return result, nil
 }
@@ -183,10 +183,10 @@ func (r *StorageVaultReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // finalizeStorageVault drops the storage vault from Doris
 func (r *StorageVaultReconciler) finalizeStorageVault(ctx context.Context, storageVault *mysqlv1alpha1.StorageVault) error {
-	log := log.FromContext(ctx).WithName("StorageVaultReconciler")
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 
 	if !storageVault.Status.VaultCreated {
-		log.Info("[StorageVault] Storage vault was not created, skipping finalization", "name", storageVault.Spec.Name)
+		log.Info("Storage vault was not created, skipping finalization")
 		return nil
 	}
 
@@ -198,28 +198,28 @@ func (r *StorageVaultReconciler) finalizeStorageVault(ctx context.Context, stora
 	}, mysql)
 	if err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			log.Info("[StorageVault] MySQL cluster not found, cannot drop storage vault", "clusterName", storageVault.Spec.ClusterName)
+			log.Info("MySQL cluster not found, cannot drop storage vault", "clusterName", storageVault.Spec.ClusterName)
 			return nil
 		}
-		return fmt.Errorf("[StorageVault] failed to get MySQL cluster: %w", err)
+		return fmt.Errorf("failed to get MySQL cluster: %w", err)
 	}
 
 	// Get MySQL client
 	mysqlClient, err := r.MySQLClients.GetClient(mysql.GetKey())
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to get MySQL client", "key", mysql.GetKey())
-		return fmt.Errorf("[StorageVault] failed to get MySQL client: %w", err)
+		log.Error(err, "Failed to get MySQL client", "key", mysql.GetKey())
+		return fmt.Errorf("failed to get MySQL client: %w", err)
 	}
 
 	// Attempt to drop the storage vault
-	log.Info("[StorageVault] Dropping storage vault", "name", storageVault.Spec.Name)
+	log.Info("Dropping storage vault")
 	_, err = mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP STORAGE VAULT IF EXISTS '%s'", storageVault.Spec.Name))
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to drop storage vault", "name", storageVault.Spec.Name)
-		return fmt.Errorf("[StorageVault] failed to drop storage vault: %w", err)
+		log.Error(err, "Failed to drop storage vault")
+		return fmt.Errorf("failed to drop storage vault: %w", err)
 	}
 
-	log.Info("[StorageVault] Successfully dropped storage vault", "name", storageVault.Spec.Name)
+	log.Info("Successfully dropped storage vault")
 	return nil
 }
 
@@ -233,53 +233,53 @@ func (r *StorageVaultReconciler) reconcileStorageVault(ctx context.Context, stor
 		Namespace: storageVault.Namespace,
 		Name:      storageVault.Spec.ClusterName,
 	}, mysql); err != nil {
-		log.Error(err, "[StorageVault] Failed to get MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
-		return ctrl.Result{}, fmt.Errorf("[StorageVault] failed to get MySQL cluster: %w", err)
+		log.Error(err, "Failed to get MySQL cluster", "clusterName", storageVault.Spec.ClusterName)
+		return ctrl.Result{}, fmt.Errorf("failed to get MySQL cluster: %w", err)
 	}
 
 	// Get MySQL client from MySQLClients
 	mysqlClient, err := r.MySQLClients.GetClient(mysql.GetKey())
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to get MySQL client", "key", mysql.GetKey(), "clusterName", storageVault.Spec.ClusterName)
-		return ctrl.Result{}, fmt.Errorf("[StorageVault] failed to get MySQL client: %w", err)
+		log.Error(err, "Failed to get MySQL client", "key", mysql.GetKey(), "clusterName", storageVault.Spec.ClusterName)
+		return ctrl.Result{}, fmt.Errorf("failed to get MySQL client: %w", err)
 	}
-	log.Info("[StorageVault] Successfully connected to MySQL client")
+	log.Info("Successfully connected to MySQL client")
 
 	// Check if storage vault exists
 	exists, err := r.storageVaultExists(ctx, mysqlClient, storageVault.Spec.Name)
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to check if storage vault exists", "name", storageVault.Spec.Name)
-		return ctrl.Result{}, fmt.Errorf("[StorageVault] failed to check if storage vault exists: %w", err)
+		log.Error(err, "Failed to check if storage vault exists")
+		return ctrl.Result{}, fmt.Errorf("failed to check if storage vault exists: %w", err)
 	}
 
 	if !exists {
 		// Create storage vault if not exists
 		if err := r.createStorageVault(ctx, mysqlClient, storageVault); err != nil {
-			log.Error(err, "[StorageVault] Failed to create storage vault", "name", storageVault.Spec.Name)
-			return ctrl.Result{}, fmt.Errorf("[StorageVault] failed to create storage vault: %w", err)
+			log.Error(err, "Failed to create storage vault")
+			return ctrl.Result{}, fmt.Errorf("failed to create storage vault: %w", err)
 		}
-		log.Info("[StorageVault] Created storage vault successfully", "name", storageVault.Spec.Name)
+		log.Info("Created storage vault successfully")
 		storageVault.Status.VaultCreated = true
 	} else {
 		storageVault.Status.VaultCreated = true
 		// Update storage vault if exists
 		if err := r.updateStorageVault(ctx, mysqlClient, storageVault); err != nil {
-			log.Error(err, "[StorageVault] Failed to update storage vault", "name", storageVault.Spec.Name)
-			return ctrl.Result{}, fmt.Errorf("[StorageVault] failed to update storage vault: %w", err)
+			log.Error(err, "Failed to update storage vault")
+			return ctrl.Result{}, fmt.Errorf("failed to update storage vault: %w", err)
 		}
-		log.Info("[StorageVault] Updated storage vault successfully", "name", storageVault.Spec.Name)
+		log.Info("Updated storage vault successfully")
 	}
 
 	// Handle default vault setting
 	if err := r.handleDefaultVault(ctx, mysqlClient, storageVault); err != nil {
-		log.Error(err, "[StorageVault] Failed to handle default storage vault", "name", storageVault.Spec.Name)
-		return ctrl.Result{}, fmt.Errorf("[StorageVault] failed to handle default storage vault: %w", err)
+		log.Error(err, "Failed to handle default storage vault")
+		return ctrl.Result{}, fmt.Errorf("failed to handle default storage vault: %w", err)
 	}
 
 	// Update status
 	if err := r.Status().Update(ctx, storageVault); err != nil {
-		log.Error(err, "[StorageVault] Failed to update storage vault status", "storageVault", storageVault.Name)
-		return ctrl.Result{}, fmt.Errorf("[StorageVault] failed to update storage vault status: %w", err)
+		log.Error(err, "Failed to update storage vault status")
+		return ctrl.Result{}, fmt.Errorf("failed to update storage vault status: %w", err)
 	}
 
 	return ctrl.Result{}, nil
@@ -287,8 +287,8 @@ func (r *StorageVaultReconciler) reconcileStorageVault(ctx context.Context, stor
 
 // storageVaultExists checks if a storage vault exists
 func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql.DB, name string) (bool, error) {
-	log := log.FromContext(ctx).WithName("StorageVaultReconciler")
-	log.Info("[StorageVault] Checking if storage vault exists", "name", name)
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", name)
+	log.Info("Checking if storage vault exists")
 
 	// Execute SHOW STORAGE VAULTS to get all vaults
 	rows, err := db.QueryContext(ctx, "SHOW STORAGE VAULTS")
@@ -316,15 +316,15 @@ func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql
 	}
 
 	if !exists {
-		log.Info("[StorageVault] Storage vault does not exist", "name", name)
+		log.Info("Storage vault does not exist")
 	}
 	return exists, nil
 }
 
 // createStorageVault creates a new storage vault in Doris
 func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault) error {
-	log := log.FromContext(ctx).WithName("StorageVaultReconciler")
-	log.Info("[StorageVault] Creating new storage vault", "name", storageVault.Spec.Name)
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
+	log.Info("Creating new storage vault")
 
 	// Build properties map
 	properties := make(map[string]string)
@@ -350,19 +350,19 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 				Name:      storageVault.Spec.S3Properties.AccessKeySecretRef.Name,
 			}, accessKeySecret)
 			if err != nil {
-				log.Error(err, "[StorageVault] Failed to get access key secret",
+				log.Error(err, "Failed to get access key secret",
 					"secretName", storageVault.Spec.S3Properties.AccessKeySecretRef.Name)
-				return fmt.Errorf("[StorageVault] failed to get access key secret: %w", err)
+				return fmt.Errorf("failed to get access key secret: %w", err)
 			}
 
 			// Add access key to properties
 			if accessKey, ok := accessKeySecret.Data[storageVault.Spec.S3Properties.AccessKeySecretRef.Key]; ok {
 				properties["s3.access_key"] = string(accessKey)
-				log.Info("[StorageVault] Access key retrieved successfully")
+				log.Info("Access key retrieved successfully")
 			} else {
-				log.Error(nil, "[StorageVault] Access key not found in secret",
+				log.Error(nil, "Access key not found in secret",
 					"key", storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
-				return fmt.Errorf("[StorageVault] access key not found in secret using key %s",
+				return fmt.Errorf("access key not found in secret using key %s",
 					storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
 			}
 		}
@@ -375,19 +375,19 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 				Name:      storageVault.Spec.S3Properties.SecretKeySecretRef.Name,
 			}, secretKeySecret)
 			if err != nil {
-				log.Error(err, "[StorageVault] Failed to get secret key secret",
+				log.Error(err, "Failed to get secret key secret",
 					"secretName", storageVault.Spec.S3Properties.SecretKeySecretRef.Name)
-				return fmt.Errorf("[StorageVault] failed to get secret key secret: %w", err)
+				return fmt.Errorf("failed to get secret key secret: %w", err)
 			}
 
 			// Add secret key to properties
 			if secretKey, ok := secretKeySecret.Data[storageVault.Spec.S3Properties.SecretKeySecretRef.Key]; ok {
 				properties["s3.secret_key"] = string(secretKey)
-				log.Info("[StorageVault] Secret key retrieved successfully")
+				log.Info("Secret key retrieved successfully")
 			} else {
-				log.Error(nil, "[StorageVault] Secret key not found in secret",
+				log.Error(nil, "Secret key not found in secret",
 					"key", storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
-				return fmt.Errorf("[StorageVault] secret key not found in secret using key %s",
+				return fmt.Errorf("secret key not found in secret using key %s",
 					storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
 			}
 		}
@@ -403,21 +403,21 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 		storageVault.Spec.Name,
 		strings.Join(props, ", "))
 
-	log.Info("[StorageVault] Executing create storage vault query", "name", storageVault.Spec.Name)
+	log.Info("Executing create storage vault query")
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to execute CREATE STORAGE VAULT query")
+		log.Error(err, "Failed to execute CREATE STORAGE VAULT query")
 		return err
 	}
 
-	log.Info("[StorageVault] Storage vault created successfully", "name", storageVault.Spec.Name)
+	log.Info("Storage vault created successfully")
 	return nil
 }
 
 // updateStorageVault updates an existing storage vault in Doris
 func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault) error {
-	log := log.FromContext(ctx).WithName("StorageVaultReconciler")
-	log.Info("[StorageVault] Updating storage vault", "name", storageVault.Spec.Name)
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
+	log.Info("Updating storage vault")
 
 	// Build properties map
 	properties := make(map[string]string)
@@ -443,19 +443,19 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 				Name:      storageVault.Spec.S3Properties.AccessKeySecretRef.Name,
 			}, accessKeySecret)
 			if err != nil {
-				log.Error(err, "[StorageVault] Failed to get access key secret",
+				log.Error(err, "Failed to get access key secret",
 					"secretName", storageVault.Spec.S3Properties.AccessKeySecretRef.Name)
-				return fmt.Errorf("[StorageVault] failed to get access key secret: %w", err)
+				return fmt.Errorf("failed to get access key secret: %w", err)
 			}
 
 			// Add access key to properties
 			if accessKey, ok := accessKeySecret.Data[storageVault.Spec.S3Properties.AccessKeySecretRef.Key]; ok {
 				properties["s3.access_key"] = string(accessKey)
-				log.Info("[StorageVault] Access key retrieved successfully")
+				log.Info("Access key retrieved successfully")
 			} else {
-				log.Error(nil, "[StorageVault] Access key not found in secret",
+				log.Error(nil, "Access key not found in secret",
 					"key", storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
-				return fmt.Errorf("[StorageVault] access key not found in secret using key %s",
+				return fmt.Errorf("access key not found in secret using key %s",
 					storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
 			}
 		}
@@ -468,19 +468,19 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 				Name:      storageVault.Spec.S3Properties.SecretKeySecretRef.Name,
 			}, secretKeySecret)
 			if err != nil {
-				log.Error(err, "[StorageVault] Failed to get secret key secret",
+				log.Error(err, "Failed to get secret key secret",
 					"secretName", storageVault.Spec.S3Properties.SecretKeySecretRef.Name)
-				return fmt.Errorf("[StorageVault] failed to get secret key secret: %w", err)
+				return fmt.Errorf("failed to get secret key secret: %w", err)
 			}
 
 			// Add secret key to properties
 			if secretKey, ok := secretKeySecret.Data[storageVault.Spec.S3Properties.SecretKeySecretRef.Key]; ok {
 				properties["s3.secret_key"] = string(secretKey)
-				log.Info("[StorageVault] Secret key retrieved successfully")
+				log.Info("Secret key retrieved successfully")
 			} else {
-				log.Error(nil, "[StorageVault] Secret key not found in secret",
+				log.Error(nil, "Secret key not found in secret",
 					"key", storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
-				return fmt.Errorf("[StorageVault] secret key not found in secret using key %s",
+				return fmt.Errorf("secret key not found in secret using key %s",
 					storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
 			}
 		}
@@ -496,40 +496,40 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 		storageVault.Spec.Name,
 		strings.Join(props, ", "))
 
-	log.Info("[StorageVault] Executing alter storage vault query", "name", storageVault.Spec.Name)
+	log.Info("Executing alter storage vault query")
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to execute ALTER STORAGE VAULT query")
+		log.Error(err, "Failed to execute ALTER STORAGE VAULT query")
 		return err
 	}
 
-	log.Info("[StorageVault] Storage vault updated successfully", "name", storageVault.Spec.Name)
+	log.Info("Storage vault updated successfully")
 	return nil
 }
 
 func (r *StorageVaultReconciler) handleDefaultVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault) error {
-	log := log.FromContext(ctx).WithName("StorageVaultReconciler")
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	// Get current default vault
 	var currentDefault string
 	err := db.QueryRowContext(ctx, "SHOW DEFAULT STORAGE VAULT").Scan(&currentDefault)
 	if err != nil {
-		return fmt.Errorf("[StorageVault] failed to get current default storage vault: %w", err)
+		return fmt.Errorf("failed to get current default storage vault: %w", err)
 	}
 
-	log.Info("[StorageVault] Current default storage vault", "currentDefault", currentDefault)
+	log.Info("Current default storage vault", "currentDefault", currentDefault)
 
 	// Update status
 	storageVault.Status.IsDefault = currentDefault == storageVault.Spec.Name
 
 	// If this vault should be default and isn't currently default
 	if storageVault.Spec.IsDefault != nil && *storageVault.Spec.IsDefault && currentDefault != storageVault.Spec.Name {
-		log.Info("[StorageVault] Setting storage vault as default", "name", storageVault.Spec.Name)
+		log.Info("Setting storage vault as default")
 		_, err := db.ExecContext(ctx, fmt.Sprintf("SET DEFAULT STORAGE VAULT '%s'", storageVault.Spec.Name))
 		if err != nil {
-			return fmt.Errorf("[StorageVault] failed to set default storage vault: %w", err)
+			return fmt.Errorf("failed to set default storage vault: %w", err)
 		}
 		storageVault.Status.IsDefault = true
-		log.Info("[StorageVault] Successfully set storage vault as default", "name", storageVault.Spec.Name)
+		log.Info("Successfully set storage vault as default")
 	}
 
 	return nil
