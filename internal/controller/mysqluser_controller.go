@@ -499,10 +499,10 @@ func buildGrants(privs sql.NullString, targetType TargetType) ([]mysqlv1alpha1.G
 	return grants, nil
 }
 
-func fetchGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) ([]mysqlv1alpha1.Grant, error) {
+func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) ([]mysqlv1alpha1.Grant, error) {
 	var grants []mysqlv1alpha1.Grant
 
-	log := log.FromContext(ctx).WithName("FetchGrants").WithValues("userIdentity", userIdentity)
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("FetchGrants").WithValues("userIdentity", userIdentity)
 	log.Info("Fetching", "userIdentity", userIdentity)
 
 	rows, err := mysqlClient.QueryContext(ctx, fmt.Sprintf("SHOW GRANTS FOR %s;", userIdentity))
@@ -525,7 +525,7 @@ func fetchGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) 
 		grant.Privileges = make(map[string]sql.NullString)
 
 		// Create scan args dynamically based on columns
-		scanArgs := make([]interface{}, len(columns))
+		scanArgs := make([]any, len(columns))
 
 		// First 4 fields are always the same
 		scanArgs[0] = &grant.UserIdentity
@@ -534,16 +534,22 @@ func fetchGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) 
 		scanArgs[3] = &grant.Roles
 
 		// Remaining fields are privileges
+		privPtrs := make(map[string]*sql.NullString)
 		for i := 4; i < len(columns); i++ {
-			var priv sql.NullString
-			scanArgs[i] = &priv
-			grant.Privileges[columns[i]] = priv
+			priv := new(sql.NullString)
+			scanArgs[i] = priv
+			privPtrs[columns[i]] = priv
 		}
 
 		err := rows.Scan(scanArgs...)
 		if err != nil {
 			log.Error(err, "Scan failed")
 			return nil, err
+		}
+
+		// Now assign the scanned values to the grant.Privileges map
+		for col, ptr := range privPtrs {
+			grant.Privileges[col] = *ptr
 		}
 
 		log.Info("Scanned", "grant", grant)
@@ -553,14 +559,12 @@ func fetchGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) 
 			if priv, exists := grant.Privileges[privType]; exists {
 				if priv.Valid && priv.String != "" {
 					if builtGrants, err := buildGrants(priv, targetType); err != nil {
-						log.Error(err, "Build grants failed", "privilegeType", privType, "targetType", targetType, "value", priv)
+						log.Error(err, "Build grants failed", "privilegeType", privType, "value", priv)
 						return nil, err
 					} else {
 						log.Info("Built grants", "privilegeType", privType, "count", len(builtGrants), "grants", builtGrants)
 						grants = append(grants, builtGrants...)
 					}
-				} else {
-					log.Info("Skipping empty privilege", "privilegeType", privType, "targetType", targetType)
 				}
 			}
 		}
@@ -645,12 +649,8 @@ func comparePrivileges(oldPrivileges, newPrivileges []string) (revokePrivileges,
 	return revokePrivileges, addPrivileges
 }
 func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRevoke, grantsToAdd []mysqlv1alpha1.Grant) {
-	log := log.Log.WithValues("function", "calculateGrantDiff")
-
 	oldGrantMap := make(map[string]mysqlv1alpha1.Grant)
 	newGrantMap := make(map[string]mysqlv1alpha1.Grant)
-
-	log.Info("Calculating grant diff", "oldGrants", oldGrants, "newGrants", newGrants)
 
 	// Normalize target for consistent comparison
 	normalizeTarget := func(target string) string {
@@ -667,13 +667,11 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 	// Map grants by normalized target
 	for _, grant := range oldGrants {
 		normalizedTarget := normalizeTarget(grant.Target)
-		log.Info("Mapping old grant", "originalTarget", grant.Target, "normalizedTarget", normalizedTarget)
 		oldGrantMap[normalizedTarget] = grant
 	}
 
 	for _, grant := range newGrants {
 		normalizedTarget := normalizeTarget(grant.Target)
-		log.Info("Mapping new grant", "originalTarget", grant.Target, "normalizedTarget", normalizedTarget)
 		newGrantMap[normalizedTarget] = grant
 	}
 
@@ -682,13 +680,6 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 		if newGrant, found := newGrantMap[target]; found {
 			// Compare privileges and determine partial revocation and addition
 			revokePrivileges, addPrivileges := comparePrivileges(oldGrant.Privileges, newGrant.Privileges)
-			log.Info("Comparing privileges for target",
-				"target", target,
-				"oldPrivileges", oldGrant.Privileges,
-				"newPrivileges", newGrant.Privileges,
-				"revokePrivileges", revokePrivileges,
-				"addPrivileges", addPrivileges)
-
 			if len(revokePrivileges) > 0 {
 				grantsToRevoke = append(grantsToRevoke, mysqlv1alpha1.Grant{
 					Target:     oldGrant.Target,
@@ -703,7 +694,6 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 			}
 		} else {
 			// If the target doesn't exist in new grants, revoke it completely
-			log.Info("Target not found in new grants, revoking completely", "target", target, "privileges", oldGrant.Privileges)
 			grantsToRevoke = append(grantsToRevoke, oldGrant)
 		}
 	}
@@ -711,12 +701,10 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 	// Add completely new targets
 	for target, newGrant := range newGrantMap {
 		if _, found := oldGrantMap[target]; !found {
-			log.Info("Target not found in old grants, adding completely", "target", target, "privileges", newGrant.Privileges)
 			grantsToAdd = append(grantsToAdd, newGrant)
 		}
 	}
 
-	log.Info("Grant diff calculation completed", "grantsToRevoke", grantsToRevoke, "grantsToAdd", grantsToAdd)
 	return grantsToRevoke, grantsToAdd
 }
 
@@ -724,8 +712,7 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("UpdateGrants").WithValues("userIdentity", userIdentity)
 
 	// Fetch grants
-	log.Info("Fetching grants")
-	existingGrants, fetchErr := fetchGrants(ctx, mysqlClient, userIdentity)
+	existingGrants, fetchErr := r.fetchGrants(ctx, mysqlClient, userIdentity)
 	if fetchErr != nil {
 		log.Error(fetchErr, "Failed to fetch grants")
 		return fetchErr
