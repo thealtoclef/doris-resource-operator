@@ -325,6 +325,36 @@ const (
 	StorageVaultTarget TargetType = "storage_vault"
 )
 
+// TargetFormat stores format information for a target type
+type TargetFormat struct {
+	FormatString string   // Format string for creating SQL representation
+	Keywords     []string // Keywords to identify this target type in a string
+}
+
+// TargetTypeFormats maps target types to their SQL representation formats
+var TargetTypeFormats = map[TargetType]TargetFormat{
+	ResourceTarget: {
+		FormatString: "RESOURCE '%s'",
+		Keywords:     []string{"RESOURCE"},
+	},
+	WorkloadGroupTarget: {
+		FormatString: "WORKLOAD GROUP '%s'",
+		Keywords:     []string{"WORKLOAD GROUP"},
+	},
+	ComputeGroupTarget: {
+		FormatString: "COMPUTE GROUP '%s'",
+		Keywords:     []string{"COMPUTE GROUP"},
+	},
+	StorageVaultTarget: {
+		FormatString: "STORAGE VAULT '%s'",
+		Keywords:     []string{"STORAGE VAULT"},
+	},
+	TableTarget: {
+		FormatString: "",         // Special case, handled separately
+		Keywords:     []string{}, // Default when no other keywords match
+	},
+}
+
 // Target represents a privilege target in Doris
 type Target struct {
 	Type TargetType
@@ -333,16 +363,8 @@ type Target struct {
 
 // String returns the SQL representation of the target
 func (t Target) String() string {
-	switch t.Type {
-	case ResourceTarget:
-		return fmt.Sprintf("RESOURCE '%s'", t.Name)
-	case WorkloadGroupTarget:
-		return fmt.Sprintf("WORKLOAD GROUP '%s'", t.Name)
-	case ComputeGroupTarget:
-		return fmt.Sprintf("COMPUTE GROUP '%s'", t.Name)
-	case StorageVaultTarget:
-		return fmt.Sprintf("STORAGE VAULT '%s'", t.Name)
-	default:
+	format, exists := TargetTypeFormats[t.Type]
+	if !exists || t.Type == TableTarget {
 		// For table targets, ensure proper format (catalog.database.table)
 		parts := strings.Split(t.Name, ".")
 		for len(parts) < 3 {
@@ -350,6 +372,19 @@ func (t Target) String() string {
 		}
 		return strings.Join(parts, ".")
 	}
+	return fmt.Sprintf(format.FormatString, t.Name)
+}
+
+// ParseTargetType extracts the target type from a target string
+func ParseTargetType(targetStr string) TargetType {
+	for targetType, format := range TargetTypeFormats {
+		for _, keyword := range format.Keywords {
+			if keyword != "" && strings.Contains(targetStr, keyword) {
+				return targetType
+			}
+		}
+	}
+	return TableTarget // Default case
 }
 
 // Grant represents a single grant in Doris
@@ -577,6 +612,8 @@ func comparePrivileges(oldPrivileges, newPrivileges []string) (revokePrivileges,
 func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRevoke, grantsToAdd []mysqlv1alpha1.Grant) {
 	oldGrantMap := make(map[string]mysqlv1alpha1.Grant)
 	newGrantMap := make(map[string]mysqlv1alpha1.Grant)
+	// Track privilege types present in the new grants
+	newPrivilegeTargetTypes := make(map[TargetType]bool)
 
 	for _, grant := range oldGrants {
 		oldGrantMap[grant.Target] = grant
@@ -584,6 +621,9 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 
 	for _, grant := range newGrants {
 		newGrantMap[grant.Target] = grant
+		// Extract target type using the centralized function
+		targetType := ParseTargetType(grant.Target)
+		newPrivilegeTargetTypes[targetType] = true
 	}
 
 	for target, oldGrant := range oldGrantMap {
@@ -603,7 +643,14 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 				})
 			}
 		} else {
-			grantsToRevoke = append(grantsToRevoke, oldGrant)
+			// Check if the target type of this old grant is completely absent from new grants
+			oldTargetType := ParseTargetType(oldGrant.Target)
+
+			// If this target type is completely absent from new grants, or the specific target is not in new grants,
+			// revoke it completely
+			if !newPrivilegeTargetTypes[oldTargetType] || !found {
+				grantsToRevoke = append(grantsToRevoke, oldGrant)
+			}
 		}
 	}
 
