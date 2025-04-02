@@ -20,25 +20,85 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// VaultType defines the type of storage vault
+// +kubebuilder:validation:Enum=S3;HDFS
+type VaultType string
+
+const (
+	// S3VaultType represents an S3-compatible storage vault
+	S3VaultType VaultType = "S3"
+	// HDFSVaultType represents an HDFS storage vault (reserved for future implementation)
+	HDFSVaultType VaultType = "HDFS"
+)
+
+// S3Provider defines the supported S3 providers
+// +kubebuilder:validation:Enum=S3;OSS;COS;OBS;BOS;AZURE;GCP
+type S3Provider string
+
+const (
+	// S3ProviderS3 is AWS S3
+	S3ProviderS3 S3Provider = "S3"
+	// S3ProviderOSS is Alibaba Cloud OSS
+	S3ProviderOSS S3Provider = "OSS"
+	// S3ProviderCOS is Tencent Cloud COS
+	S3ProviderCOS S3Provider = "COS"
+	// S3ProviderOBS is Huawei Cloud OBS
+	S3ProviderOBS S3Provider = "OBS"
+	// S3ProviderBOS is Baidu Cloud BOS
+	S3ProviderBOS S3Provider = "BOS"
+	// S3ProviderAZURE is Microsoft Azure Storage
+	S3ProviderAZURE S3Provider = "AZURE"
+	// S3ProviderGCP is Google Cloud Storage
+	S3ProviderGCP S3Provider = "GCP"
+)
+
+// S3Properties defines the properties for an S3 storage vault
+type S3Properties struct {
+	// Endpoint is the S3 endpoint
+	Endpoint string `json:"endpoint"`
+
+	// Region is the S3 region
+	Region string `json:"region"`
+
+	// RootPath is the path where the data would be stored
+	RootPath string `json:"rootPath"`
+
+	// Bucket is the S3 bucket name (StorageAccount for Azure)
+	Bucket string `json:"bucket"`
+
+	// AuthSecret is the name of the Kubernetes secret containing access_key and secret_key
+	AuthSecret string `json:"authSecret"`
+
+	// Provider is the cloud vendor which provides the object storage service
+	Provider S3Provider `json:"provider"`
+
+	// +kubebuilder:default=true
+
+	// UsePathStyle indicates using path-style URL (true) or virtual-hosted-style URL (false)
+	UsePathStyle *bool `json:"usePathStyle,omitempty"`
+}
+
 // StorageVaultSpec defines the desired state of StorageVault
 type StorageVaultSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Cluster name is immutable"
-
 	// Cluster name to reference to, which decides the destination
+	// +kubebuilder:validation:Required
 	ClusterName string `json:"clusterName"`
 
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z][a-zA-Z0-9_]*$`
 	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Required
 	// Name of the storage vault
 	Name string `json:"name"`
 
-	// Properties defines the direct key-value properties for the storage vault
-	// +kubebuilder:validation:Optional
-	Properties map[string]string `json:"properties,omitempty"`
+	// Type of storage vault
+	// +kubebuilder:validation:Required
+	Type VaultType `json:"type"`
 
-	// PropertiesSecret is the name of the Kubernetes secret containing additional properties
+	// S3Properties contains configuration for S3 vault type
 	// +kubebuilder:validation:Optional
-	PropertiesSecret string `json:"propertiesSecret,omitempty"`
+	// +kubebuilder:validation:XValidation:rule="self != null || self.Type != 'S3'",message="S3Properties must be provided when Type is S3"
+	S3Properties *S3Properties `json:"s3Properties,omitempty"`
 
 	// IsDefault indicates whether this vault should be set as the default storage vault
 	// +kubebuilder:validation:Optional

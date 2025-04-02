@@ -68,19 +68,64 @@ spec:
                 maxLength: 64
                 pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
                 type: string
-              properties:
-                additionalProperties:
-                  type: string
-                description: Properties defines the direct key-value properties for
-                  the storage vault
+              s3Properties:
+                description: S3Properties contains configuration for S3 vault type
+                properties:
+                  authSecret:
+                    description: AuthSecret is the name of the Kubernetes secret containing
+                      access_key and secret_key
+                    type: string
+                  bucket:
+                    description: Bucket is the S3 bucket name (StorageAccount for
+                      Azure)
+                    type: string
+                  endpoint:
+                    description: Endpoint is the S3 endpoint
+                    type: string
+                  provider:
+                    description: Provider is the cloud vendor which provides the object
+                      storage service
+                    enum:
+                    - S3
+                    - OSS
+                    - COS
+                    - OBS
+                    - BOS
+                    - AZURE
+                    - GCP
+                    type: string
+                  region:
+                    description: Region is the S3 region
+                    type: string
+                  rootPath:
+                    description: RootPath is the path where the data would be stored
+                    type: string
+                  usePathStyle:
+                    default: true
+                    description: UsePathStyle indicates using path-style URL (true)
+                      or virtual-hosted-style URL (false)
+                    type: boolean
+                required:
+                - authSecret
+                - bucket
+                - endpoint
+                - provider
+                - region
+                - rootPath
                 type: object
-              propertiesSecret:
-                description: PropertiesSecret is the name of the Kubernetes secret
-                  containing additional properties
+                x-kubernetes-validations:
+                - message: S3Properties must be provided when Type is S3
+                  rule: self != null || self.Type != 'S3'
+              type:
+                description: Type of storage vault
+                enum:
+                - S3
+                - HDFS
                 type: string
             required:
             - clusterName
             - name
+            - type
             type: object
           status:
             description: StorageVaultStatus defines the observed state of StorageVault

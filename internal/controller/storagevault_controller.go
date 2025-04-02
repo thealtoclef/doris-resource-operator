@@ -31,8 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"maps"
-
 	_ "github.com/go-sql-driver/mysql"
 	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,6 +51,10 @@ const (
 	storageVaultPhaseNotReady               = "NotReady"
 	storageVaultReasonFailedToFinalize      = "Failed to finalize"
 	storageVaultReasonMySQLFetchFailed      = "Failed to fetch cluster"
+
+	// S3 Secret keys
+	s3AccessKeyField = "access_key"
+	s3SecretKeyField = "secret_key"
 )
 
 // StorageVaultReconciler reconciles a StorageVault object
@@ -296,13 +298,12 @@ func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql
 	}
 	defer rows.Close()
 
-	// Check if our vault exists in the results
+	// Parse columns based on SHOW STORAGE VAULTS output format
 	exists := false
 	for rows.Next() {
-		var vaultName string
-		var properties string
-		if err := rows.Scan(&vaultName, &properties); err != nil {
-			return false, err
+		var vaultName, id, properties, isDefault string
+		if err := rows.Scan(&vaultName, &id, &properties, &isDefault); err != nil {
+			return false, fmt.Errorf("failed to scan storage vault row: %w", err)
 		}
 		if vaultName == name {
 			exists = true
@@ -314,9 +315,7 @@ func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql
 		return false, err
 	}
 
-	if !exists {
-		log.Info("Storage vault does not exist")
-	}
+	log.Info("Storage vault check result", "exists", exists)
 	return exists, nil
 }
 
@@ -325,30 +324,57 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Creating new storage vault")
 
-	// Initialize properties map with values from the Properties field
+	// Initialize properties map
 	properties := make(map[string]string)
-	for k, v := range storageVault.Spec.Properties {
-		properties[k] = v
-	}
 
-	// If PropertiesSecret is provided, get properties from the secret
-	if storageVault.Spec.PropertiesSecret != "" {
-		propertiesSecret := &v1.Secret{}
+	// Set the vault type
+	properties["type"] = string(storageVault.Spec.Type)
+
+	// Set properties based on the vault type
+	switch storageVault.Spec.Type {
+	case mysqlv1alpha1.S3VaultType:
+		// Add S3 properties
+		s3Props := storageVault.Spec.S3Properties
+		properties["s3.endpoint"] = s3Props.Endpoint
+		properties["s3.region"] = s3Props.Region
+		properties["s3.root.path"] = s3Props.RootPath
+		properties["s3.bucket"] = s3Props.Bucket
+		properties["provider"] = string(s3Props.Provider)
+
+		if s3Props.UsePathStyle != nil {
+			properties["use_path_style"] = fmt.Sprintf("%t", *s3Props.UsePathStyle)
+		}
+
+		// Get access_key and secret_key from the secret
+		secret := &v1.Secret{}
 		err := r.Get(ctx, types.NamespacedName{
 			Namespace: storageVault.Namespace,
-			Name:      storageVault.Spec.PropertiesSecret,
-		}, propertiesSecret)
+			Name:      s3Props.AuthSecret,
+		}, secret)
 		if err != nil {
-			log.Error(err, "Failed to get properties secret",
-				"secretName", storageVault.Spec.PropertiesSecret)
-			return fmt.Errorf("failed to get properties secret: %w", err)
+			log.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
+			return fmt.Errorf("failed to get auth secret: %w", err)
 		}
 
-		// Add all properties from the secret
-		for k, v := range propertiesSecret.Data {
-			properties[k] = string(v)
-			log.Info("Property retrieved from secret", "key", k)
+		// Get access_key and secret_key
+		accessKey, ok := secret.Data[s3AccessKeyField]
+		if !ok {
+			return fmt.Errorf("auth secret missing required field: %s", s3AccessKeyField)
 		}
+		secretKey, ok := secret.Data[s3SecretKeyField]
+		if !ok {
+			return fmt.Errorf("auth secret missing required field: %s", s3SecretKeyField)
+		}
+
+		properties["s3.access_key"] = string(accessKey)
+		properties["s3.secret_key"] = string(secretKey)
+
+	case mysqlv1alpha1.HDFSVaultType:
+		// HDFS support to be implemented in the future
+		return fmt.Errorf("HDFS vault type is not currently supported")
+
+	default:
+		return fmt.Errorf("unsupported vault type: %s", storageVault.Spec.Type)
 	}
 
 	// Build properties string
@@ -367,6 +393,7 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 		return err
 	}
 
+	log.Info("Storage vault created successfully")
 	return nil
 }
 
@@ -375,28 +402,75 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Updating storage vault")
 
-	// Initialize properties map with values from the Properties field
-	properties := make(map[string]string)
-	maps.Copy(properties, storageVault.Spec.Properties)
+	// Get current vault properties to compare
+	currentProperties, err := r.getStorageVaultProperties(ctx, db, storageVault.Spec.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get current storage vault properties: %w", err)
+	}
 
-	// If PropertiesSecret is provided, get properties from the secret
-	if storageVault.Spec.PropertiesSecret != "" {
-		propertiesSecret := &v1.Secret{}
+	// Initialize properties map for the update
+	properties := make(map[string]string)
+
+	// Check if we're trying to rename the vault
+	if storageVault.Spec.Name != storageVault.Name {
+		properties["VAULT_NAME"] = storageVault.Spec.Name
+	}
+
+	// The type is immutable, so we don't include it in the update
+	vaultType := currentProperties["type"]
+	if vaultType == "" {
+		// If type is not found in current properties, use the one from spec
+		vaultType = string(storageVault.Spec.Type)
+	}
+
+	// Set properties based on the vault type
+	switch mysqlv1alpha1.VaultType(vaultType) {
+	case mysqlv1alpha1.S3VaultType:
+		// Add S3 properties
+		s3Props := storageVault.Spec.S3Properties
+		properties["s3.endpoint"] = s3Props.Endpoint
+		properties["s3.region"] = s3Props.Region
+		properties["s3.root.path"] = s3Props.RootPath
+		properties["s3.bucket"] = s3Props.Bucket
+		properties["provider"] = string(s3Props.Provider)
+
+		if s3Props.UsePathStyle != nil {
+			properties["use_path_style"] = fmt.Sprintf("%t", *s3Props.UsePathStyle)
+		}
+
+		// Get access_key and secret_key from the secret
+		secret := &v1.Secret{}
 		err := r.Get(ctx, types.NamespacedName{
 			Namespace: storageVault.Namespace,
-			Name:      storageVault.Spec.PropertiesSecret,
-		}, propertiesSecret)
+			Name:      s3Props.AuthSecret,
+		}, secret)
 		if err != nil {
-			log.Error(err, "Failed to get properties secret",
-				"secretName", storageVault.Spec.PropertiesSecret)
-			return fmt.Errorf("failed to get properties secret: %w", err)
+			log.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
+			return fmt.Errorf("failed to get auth secret: %w", err)
 		}
 
-		// Add all properties from the secret
-		for k, v := range propertiesSecret.Data {
-			properties[k] = string(v)
-			log.Info("Property retrieved from secret", "key", k)
+		// Get access_key - Always update this as it might have changed
+		accessKey, ok := secret.Data[s3AccessKeyField]
+		if !ok {
+			return fmt.Errorf("auth secret missing required field: %s", s3AccessKeyField)
 		}
+		properties["s3.access_key"] = string(accessKey)
+
+		// Get secret_key - Only add it if it's different from what's in Doris
+		// Note: secret_key is masked in SHOW STORAGE VAULTS, so we can't compare it
+		// We'll always update it to ensure consistency
+		secretKey, ok := secret.Data[s3SecretKeyField]
+		if !ok {
+			return fmt.Errorf("auth secret missing required field: %s", s3SecretKeyField)
+		}
+		properties["s3.secret_key"] = string(secretKey)
+
+	case mysqlv1alpha1.HDFSVaultType:
+		// HDFS support to be implemented in the future
+		return fmt.Errorf("HDFS vault type is not currently supported")
+
+	default:
+		return fmt.Errorf("unsupported vault type: %s", vaultType)
 	}
 
 	// Build properties string
@@ -405,19 +479,89 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
 	}
 
+	// If no properties to update, skip the update
+	if len(props) == 0 {
+		log.Info("No properties to update")
+		return nil
+	}
+
 	query := fmt.Sprintf("ALTER STORAGE VAULT %s SET PROPERTIES (%s)",
 		storageVault.Spec.Name,
 		strings.Join(props, ", "))
 
-	log.Info("Executing alter storage vault query")
-	_, err := db.ExecContext(ctx, query)
+	_, err = db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "Failed to execute ALTER STORAGE VAULT query")
+		log.Error(err, "Failed to update storage vault")
 		return err
 	}
 
 	log.Info("Storage vault updated successfully")
 	return nil
+}
+
+// getStorageVaultProperties retrieves the current properties of a storage vault
+func (r *StorageVaultReconciler) getStorageVaultProperties(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", name)
+	log.Info("Getting storage vault properties")
+
+	// Execute SHOW STORAGE VAULTS to get all vaults
+	rows, err := db.QueryContext(ctx, "SHOW STORAGE VAULTS")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Find the target vault and parse its properties
+	for rows.Next() {
+		var vaultName, id, propertiesStr, isDefault string
+		if err := rows.Scan(&vaultName, &id, &propertiesStr, &isDefault); err != nil {
+			return nil, fmt.Errorf("failed to scan storage vault row: %w", err)
+		}
+
+		if vaultName == name {
+			// Parse the properties string
+			properties := make(map[string]string)
+
+			// Basic parsing of key-value pairs
+			// This is a simplified version and might need enhancement based on the exact format
+			propParts := strings.Split(propertiesStr, " ")
+			for i := 0; i < len(propParts); i++ {
+				if i+1 < len(propParts) && strings.HasSuffix(propParts[i], ":") {
+					key := strings.TrimSuffix(propParts[i], ":")
+					value := propParts[i+1]
+
+					// Handle quoted values
+					if strings.HasPrefix(value, "\"") && !strings.HasSuffix(value, "\"") {
+						j := i + 2
+						for ; j < len(propParts); j++ {
+							value += " " + propParts[j]
+							if strings.HasSuffix(propParts[j], "\"") {
+								break
+							}
+						}
+						i = j
+					} else {
+						i++
+					}
+
+					// Clean up value
+					value = strings.Trim(value, "\"")
+					properties[key] = value
+				}
+			}
+
+			// Add isDefault property
+			properties["isDefault"] = isDefault
+
+			return properties, nil
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return nil, fmt.Errorf("storage vault not found: %s", name)
 }
 
 // handleDefaultVault handles setting the default storage vault
