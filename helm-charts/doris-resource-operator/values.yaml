@@ -1,13 +1,3 @@
-# set gcp if you use GCP SecretManager
-# set k8s if you use Kubernetes secrets
-adminUserSecretType: raw # set gcp if you use GCP SecretManager
-# gcpServiceAccount: GSA_NAME@GSA_PROJECT.iam.gserviceaccount.com
-# gcpProjectId: <projectid>
-# cloudSQL:
-#   instanceConnectionName:
-#   enableIamAuth: false
-#   usePrivateIp: false
-k8sSecretNamespace: default
 controllerManager:
   replicas: 1
   manager:
