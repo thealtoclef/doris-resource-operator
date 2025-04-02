@@ -23,6 +23,7 @@ import (
 	"time"
 
 	. "github.com/go-sql-driver/mysql"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,7 +33,6 @@ import (
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
 	mysqlinternal "github.com/nakamasato/mysql-operator/internal/mysql"
-	secret "github.com/nakamasato/mysql-operator/internal/secret"
 )
 
 const mysqlFinalizer = "mysql.nakamasato.com/finalizer"
@@ -43,7 +43,6 @@ type MySQLReconciler struct {
 	Scheme          *runtime.Scheme
 	MySQLClients    mysqlinternal.MySQLClients
 	MySQLDriverName string
-	SecretManagers  map[string]secret.SecretManager
 }
 
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=mysqls,verbs=get;list;watch;create;update;patch;delete
@@ -181,31 +180,37 @@ func (r *MySQLReconciler) UpdateMySQLClients(ctx context.Context, mysql *mysqlv1
 	return false, nil
 }
 
-// If GcpSecretName is set, get password from GCP secret manager
-// Otherwise user MySQL.Spec.AdminPassword
 func (r *MySQLReconciler) getMySQLConfig(ctx context.Context, mysql *mysqlv1alpha1.MySQL) (Config, error) {
 	log := log.FromContext(ctx)
-	secretManager, ok := r.SecretManagers[mysql.Spec.AdminPassword.Type]
-	if !ok {
-		return Config{}, fmt.Errorf("the specified SecretManager type (%s) doesn't exist", mysql.Spec.AdminPassword.Type)
-	}
-	password, err := secretManager.GetSecret(ctx, mysql.Spec.AdminPassword.Name)
+
+	// Get credentials from Kubernetes secret referenced by authSecret
+	secret := &v1.Secret{}
+	authSecretName := mysql.Spec.AuthSecret
+
+	// Get the secret from the same namespace as the MySQL CR
+	err := r.Get(ctx, client.ObjectKey{Namespace: mysql.Namespace, Name: authSecretName}, secret)
 	if err != nil {
-		log.Error(err, "failed to get secret from secret manager", "secret", mysql.Spec.AdminPassword.Name)
-		return Config{}, err
-	}
-	secretManager, ok = r.SecretManagers[mysql.Spec.AdminUser.Type]
-	if !ok {
-		return Config{}, fmt.Errorf("the specified SecretManager type (%s) doesn't exist", mysql.Spec.AdminUser.Type)
-	}
-	user, err := secretManager.GetSecret(ctx, mysql.Spec.AdminUser.Name)
-	if err != nil {
+		log.Error(err, "failed to get kubernetes secret", "secret", authSecretName)
 		return Config{}, err
 	}
 
+	// Extract username and password from the secret
+	username, ok := secret.Data["username"]
+	if !ok {
+		return Config{}, fmt.Errorf("secret %s is missing username key", authSecretName)
+	}
+
+	password, ok := secret.Data["password"]
+	if !ok {
+		return Config{}, fmt.Errorf("secret %s is missing password key", authSecretName)
+	}
+
+	// Log success but not the actual credentials
+	log.Info("Successfully retrieved MySQL credentials", "secret", authSecretName)
+
 	return Config{
-		User:                 user,
-		Passwd:               password,
+		User:                 string(username),
+		Passwd:               string(password),
 		Addr:                 fmt.Sprintf("%s:%d", mysql.Spec.Host, mysql.Spec.Port),
 		Net:                  "tcp",
 		AllowNativePasswords: true,

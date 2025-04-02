@@ -39,7 +39,6 @@ import (
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
 	controllers "github.com/nakamasato/mysql-operator/internal/controller"
 	"github.com/nakamasato/mysql-operator/internal/mysql"
-	"github.com/nakamasato/mysql-operator/internal/secret"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -59,25 +58,12 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
-	var adminUserSecretType string
-	var projectId string
-	var secretNamespace string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.StringVar(&adminUserSecretType, "admin-user-secret-type", "",
-		"The secret manager to get credentials from. "+
-			"Currently, support raw, gcp, and k8s. ")
-	flag.StringVar(&projectId, "gcp-project-id", "",
-		"GCP project id. Set this value to use adminUserSecretType=gcp. "+
-			"Also can be set by environment variable PROJECT_ID."+
-			"If both are set, the flag is used.")
-	flag.StringVar(&secretNamespace, "k8s-secret-namespace", "",
-		"Kubernetes namespace where MYSQL credentials secrets is located. Set this value to use adminUserSecretType=k8s. "+
-			"Also can be set by environment variable SECRET_NAMESPACE."+
-			"If both are set, the flag is used.")
+
 	opts := zap.Options{
 		Development: true,
 		TimeEncoder: zapcore.ISO8601TimeEncoder,
@@ -110,41 +96,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
-	secretManagers := map[string]secret.SecretManager{
-		"raw": secret.RawSecretManager{},
-	}
-	switch adminUserSecretType {
-	case "gcp":
-		if projectId == "" {
-			projectId = os.Getenv("PROJECT_ID")
-		}
-		gcpSecretManager, err := secret.NewGCPSecretManager(ctx, projectId)
-		if err != nil {
-			setupLog.Error(err, "failed to initialize GCPSecretManager")
-			os.Exit(1)
-		}
-		defer gcpSecretManager.Close()
-		setupLog.Info("Initialized gcpSecretManager", "projectId", projectId)
-		secretManagers["gcp"] = gcpSecretManager
-	case "k8s":
-		if secretNamespace == "" {
-			secretNamespace = os.Getenv("SECRET_NAMESPACE")
-		}
-		k8sSecretManager, err := secret.Newk8sSecretManager(ctx, secretNamespace, mgr.GetClient())
-		if err != nil {
-			setupLog.Error(err, "failed to initialize k8sSecretManager")
-			os.Exit(1)
-		}
-		setupLog.Info("Initialized k8sSecretManager", "namespace", secretNamespace)
-		secretManagers["k8s"] = k8sSecretManager
-	}
 	if err = (&controllers.MySQLReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		MySQLClients:    mysqlClients,
 		MySQLDriverName: "mysql",
-		SecretManagers:  secretManagers,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MySQL")
 		os.Exit(1)

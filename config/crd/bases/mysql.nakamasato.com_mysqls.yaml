@@ -18,8 +18,8 @@ spec:
     - jsonPath: .spec.host
       name: Host
       type: string
-    - jsonPath: .spec.adminUser.name
-      name: AdminUser
+    - jsonPath: .spec.authSecret
+      name: AuthSecret
       type: string
     - jsonPath: .status.connected
       name: Connected
@@ -57,41 +57,11 @@ spec:
             description: MySQLSpec holds the connection information for the target
               MySQL cluster.
             properties:
-              adminPassword:
-                description: AdminPassword is MySQL password to connect target MySQL
-                  cluster.
-                properties:
-                  name:
-                    description: Secret Name
-                    type: string
-                  type:
-                    description: Secret Type (e.g. gcp, raw, k8s)
-                    enum:
-                    - raw
-                    - gcp
-                    - k8s
-                    type: string
-                required:
-                - name
-                - type
-                type: object
-              adminUser:
-                description: AdminUser is MySQL user to connect target MySQL cluster.
-                properties:
-                  name:
-                    description: Secret Name
-                    type: string
-                  type:
-                    description: Secret Type (e.g. gcp, raw, k8s)
-                    enum:
-                    - raw
-                    - gcp
-                    - k8s
-                    type: string
-                required:
-                - name
-                - type
-                type: object
+              authSecret:
+                description: |-
+                  AuthSecret is a reference to a kubernetes basic auth secret containing
+                  username and password keys for authenticating to the client.
+                type: string
               host:
                 description: Host is MySQL host of target MySQL cluster.
                 type: string
@@ -100,8 +70,7 @@ spec:
                 description: Port is MySQL port of target MySQL cluster.
                 type: integer
             required:
-            - adminPassword
-            - adminUser
+            - authSecret
             - host
             type: object
           status:

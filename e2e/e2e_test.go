@@ -300,9 +300,8 @@ func newMySQL(name, namespace string) *mysqlv1alpha1.MySQL {
 		TypeMeta:   metav1.TypeMeta{APIVersion: apiVersion, Kind: "MySQL"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: mysqlv1alpha1.MySQLSpec{
-			Host:          "mysql.default",
-			AdminUser:     mysqlv1alpha1.Secret{Name: "root", Type: "raw"},
-			AdminPassword: mysqlv1alpha1.Secret{Name: "password", Type: "raw"},
+			Host:       "mysql.default",
+			AuthSecret: "mysql-auth-secret",
 		},
 	}
 }

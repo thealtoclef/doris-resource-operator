@@ -33,11 +33,10 @@ type MySQLSpec struct {
 	// Port is MySQL port of target MySQL cluster.
 	Port int16 `json:"port,omitempty"`
 
-	// AdminUser is MySQL user to connect target MySQL cluster.
-	AdminUser Secret `json:"adminUser"`
-
-	// AdminPassword is MySQL password to connect target MySQL cluster.
-	AdminPassword Secret `json:"adminPassword"`
+	// AuthSecret is a reference to a kubernetes basic auth secret containing
+	// username and password keys for authenticating to the client.
+	// +kubebuilder:validation:Required
+	AuthSecret string `json:"authSecret"`
 }
 
 // MySQLStatus defines the observed state of MySQL
@@ -57,7 +56,7 @@ type MySQLStatus struct {
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Host",type=string,JSONPath=`.spec.host`
-//+kubebuilder:printcolumn:name="AdminUser",type=string,JSONPath=`.spec.adminUser.name`
+//+kubebuilder:printcolumn:name="AuthSecret",type=string,JSONPath=`.spec.authSecret`
 //+kubebuilder:printcolumn:name="Connected",type=boolean,JSONPath=`.status.connected`
 //+kubebuilder:printcolumn:name="UserCount",type="integer",JSONPath=".status.userCount",description="The number of MySQLUsers that belongs to the MySQL"
 //+kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.reason`
@@ -82,16 +81,6 @@ type MySQLList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []MySQL `json:"items"`
-}
-
-type Secret struct {
-	// Secret Name
-	Name string `json:"name"`
-
-	// +kubebuilder:validation:Enum=raw;gcp;k8s
-
-	// Secret Type (e.g. gcp, raw, k8s)
-	Type string `json:"type"`
 }
 
 func init() {
