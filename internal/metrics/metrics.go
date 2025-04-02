@@ -16,11 +16,20 @@ type StorageVaultTotalAdaptor struct {
 	metric prometheus.Counter
 }
 
+// CatalogTotalAdaptor is a wrapper for prometheus Counter metrics
+type CatalogTotalAdaptor struct {
+	metric prometheus.Counter
+}
+
 func (m MysqlUserTotalAdaptor) Increment() {
 	m.metric.Inc()
 }
 
 func (m StorageVaultTotalAdaptor) Increment() {
+	m.metric.Inc()
+}
+
+func (m CatalogTotalAdaptor) Increment() {
 	m.metric.Inc()
 }
 
@@ -57,11 +66,30 @@ var (
 		},
 	)
 
+	catalogCreatedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: MetricsNamespace,
+			Name:      "catalog_created_total",
+			Help:      "Number of created Catalogs",
+		},
+	)
+
+	catalogDeletedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: MetricsNamespace,
+			Name:      "catalog_deleted_total",
+			Help:      "Number of deleted Catalogs",
+		},
+	)
+
 	MysqlUserCreatedTotal *MysqlUserTotalAdaptor = &MysqlUserTotalAdaptor{metric: userCreatedTotal}
 	MysqlUserDeletedTotal *MysqlUserTotalAdaptor = &MysqlUserTotalAdaptor{metric: mysqlUserDeletedTotal}
 
 	StorageVaultCreatedTotal *StorageVaultTotalAdaptor = &StorageVaultTotalAdaptor{metric: storageVaultCreatedTotal}
 	StorageVaultDeletedTotal *StorageVaultTotalAdaptor = &StorageVaultTotalAdaptor{metric: storageVaultDeletedTotal}
+
+	CatalogCreatedTotal *CatalogTotalAdaptor = &CatalogTotalAdaptor{metric: catalogCreatedTotal}
+	CatalogDeletedTotal *CatalogTotalAdaptor = &CatalogTotalAdaptor{metric: catalogDeletedTotal}
 )
 
 func init() {
@@ -71,5 +99,7 @@ func init() {
 		mysqlUserDeletedTotal,
 		storageVaultCreatedTotal,
 		storageVaultDeletedTotal,
+		catalogCreatedTotal,
+		catalogDeletedTotal,
 	)
 }
