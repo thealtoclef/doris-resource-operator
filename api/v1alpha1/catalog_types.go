@@ -55,9 +55,6 @@ type CatalogStatus struct {
 
 	// CatalogCreated indicates whether the catalog has been created in Doris
 	CatalogCreated bool `json:"catalogCreated,omitempty"`
-
-	// Type indicates the type of catalog (e.g. hms, es, jdbc)
-	Type string `json:"type,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -65,7 +62,6 @@ type CatalogStatus struct {
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 //+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
 //+kubebuilder:printcolumn:name="CatalogCreated",type="boolean",JSONPath=".status.catalogCreated"
-//+kubebuilder:printcolumn:name="Type",type="string",JSONPath=".status.type"
 
 // Catalog is the Schema for the catalogs API
 type Catalog struct {

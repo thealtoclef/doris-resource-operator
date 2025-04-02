@@ -195,7 +195,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Check if catalog exists
-	exists, catalogType, err := r.catalogExists(ctx, mysqlClient, catalog.Spec.Name)
+	exists, err := r.catalogExists(ctx, mysqlClient, catalog.Spec.Name)
 	if err != nil {
 		log.Error(err, "[Catalog] Failed to check if catalog exists", "clusterName", clusterName, "catalogName", catalog.Spec.Name)
 		catalog.Status.Phase = catalogPhaseNotReady
@@ -209,7 +209,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	if !exists {
 		// Create catalog if not exists
-		catalogType, err = r.createCatalog(ctx, mysqlClient, catalog)
+		err := r.createCatalog(ctx, mysqlClient, catalog)
 		if err != nil {
 			log.Error(err, "Failed to create catalog")
 			catalog.Status.Phase = catalogPhaseNotReady
@@ -221,12 +221,25 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, err // requeue
 		}
 		log.Info("Created catalog successfully")
+
 		catalog.Status.CatalogCreated = true
-		catalog.Status.Type = catalogType
 		metrics.CatalogCreatedTotal.Increment()
 	} else {
+		// Catalog exists, fetch properties for comparison and update if needed
+		_, err := r.getCatalogProperties(ctx, mysqlClient, catalog.Spec.Name)
+		if err != nil {
+			log.Error(err, "Failed to fetch catalog properties")
+			catalog.Status.Phase = catalogPhaseNotReady
+			catalog.Status.Reason = catalogReasonFailedToCreateCatalog
+			if serr := r.Status().Update(ctx, catalog); serr != nil {
+				log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
+				return ctrl.Result{RequeueAfter: time.Second}, nil
+			}
+			return ctrl.Result{}, err // requeue
+		}
+
 		catalog.Status.CatalogCreated = true
-		catalog.Status.Type = catalogType
+
 		// Update catalog if exists
 		if err := r.updateCatalog(ctx, mysqlClient, catalog); err != nil {
 			log.Error(err, "Failed to update catalog")
@@ -287,66 +300,59 @@ func (r *CatalogReconciler) finalizeCatalog(ctx context.Context, db *sql.DB, cat
 	return nil
 }
 
-// catalogExists checks if a catalog exists and returns its type
-func (r *CatalogReconciler) catalogExists(ctx context.Context, db *sql.DB, name string) (bool, string, error) {
+// catalogExists only checks if a catalog exists without fetching its properties
+func (r *CatalogReconciler) catalogExists(ctx context.Context, db *sql.DB, name string) (bool, error) {
 	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", name)
 	log.Info("Checking if catalog exists")
 
-	// Execute SHOW CATALOGS to get all catalogs
-	rows, err := db.QueryContext(ctx, "SHOW CATALOGS")
+	// Use SHOW CATALOGS LIKE to check for existence - this won't raise an error if the catalog doesn't exist
+	query := fmt.Sprintf("SHOW CATALOGS LIKE '%s'", name)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return false, "", err
+		log.Error(err, "Failed to execute SHOW CATALOGS LIKE query")
+		return false, err
 	}
 	defer rows.Close()
 
-	// Check if our catalog exists in the results
+	// Just check if we have any rows to determine existence
 	exists := false
-	var catalogType string
-	for rows.Next() {
-		var catalogName string
-		var catalogType string
-		if err := rows.Scan(&catalogName, &catalogType); err != nil {
-			return false, "", err
-		}
-		if catalogName == name {
-			exists = true
-			break
-		}
+	if rows.Next() {
+		exists = true
+		// Don't need to fetch data, just checking existence
 	}
 
 	if err := rows.Err(); err != nil {
-		return false, "", err
+		log.Error(err, "Error checking catalog existence")
+		return false, err
 	}
 
-	// If catalog exists, get its type using SHOW CREATE CATALOG
-	if exists {
-		var createCatalogStmt string
-		var catalogName string
-		err := db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG `%s`", name)).Scan(&catalogName, &createCatalogStmt)
-		if err != nil {
-			return true, "", err
-		}
-
-		// Extract type from the CREATE CATALOG statement
-		if typeMatch := strings.Contains(createCatalogStmt, `"type"`); typeMatch {
-			// Simple parsing to extract the type value
-			parts := strings.Split(createCatalogStmt, `"type"`)
-			if len(parts) > 1 {
-				valuePart := strings.Split(parts[1], `"`)
-				if len(valuePart) > 2 {
-					catalogType = valuePart[2]
-				}
-			}
-		}
-	} else {
+	if !exists {
 		log.Info("Catalog does not exist")
+	} else {
+		log.Info("Catalog exists")
 	}
 
-	return exists, catalogType, nil
+	return exists, nil
+}
+
+// getCatalogProperties fetches catalog properties using SHOW CREATE CATALOG
+func (r *CatalogReconciler) getCatalogProperties(ctx context.Context, db *sql.DB, name string) (string, error) {
+	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", name)
+	log.Info("Fetching catalog properties")
+
+	var catalogName string
+	var createCatalogStmt string
+	err := db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG `%s`", name)).Scan(&catalogName, &createCatalogStmt)
+	if err != nil {
+		log.Error(err, "Failed to get catalog properties with SHOW CREATE CATALOG")
+		return "", err
+	}
+
+	return createCatalogStmt, nil
 }
 
 // createCatalog creates a new catalog in Doris
-func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog) (string, error) {
+func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog) error {
 	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", catalog.Spec.Name)
 	log.Info("Creating new catalog")
 
@@ -366,7 +372,7 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 		if err != nil {
 			log.Error(err, "Failed to get properties secret",
 				"secretName", catalog.Spec.PropertiesSecret)
-			return "", fmt.Errorf("failed to get properties secret: %w", err)
+			return fmt.Errorf("failed to get properties secret: %w", err)
 		}
 
 		// Add all properties from the secret
@@ -380,12 +386,6 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 	props := make([]string, 0, len(properties))
 	for k, v := range properties {
 		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
-	}
-
-	// Extract catalog type for status
-	var catalogType string
-	if t, ok := properties["type"]; ok {
-		catalogType = t
 	}
 
 	// Build the CREATE CATALOG query
@@ -405,11 +405,11 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute CREATE CATALOG query")
-		return "", err
+		return err
 	}
 
 	log.Info("Catalog created successfully")
-	return catalogType, nil
+	return nil
 }
 
 // updateCatalog updates an existing catalog in Doris

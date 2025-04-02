@@ -24,9 +24,6 @@ spec:
     - jsonPath: .status.catalogCreated
       name: CatalogCreated
       type: boolean
-    - jsonPath: .status.type
-      name: Type
-      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -92,9 +89,6 @@ spec:
                 type: string
               reason:
                 description: Reason provides more information about the current phase
-                type: string
-              type:
-                description: Type indicates the type of catalog (e.g. hms, es, jdbc)
                 type: string
             type: object
         type: object
