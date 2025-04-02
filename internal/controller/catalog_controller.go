@@ -49,7 +49,7 @@ const (
 	catalogReasonFailedToDropCatalog   = "Failed to drop catalog"
 	catalogPhaseReady                  = "Ready"
 	catalogPhaseNotReady               = "NotReady"
-	catalogReasonFailedToFinalize      = "Failed to finalize catalog"
+	catalogReasonFailedToFinalize      = "Failed to finalize"
 	catalogReasonMySQLFetchFailed      = "Failed to fetch cluster"
 )
 
@@ -146,13 +146,14 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !catalog.GetDeletionTimestamp().IsZero() {
 		log.Info("Resource marked for deletion")
 		if controllerutil.ContainsFinalizer(catalog, catalogFinalizer) {
-			// Run finalization logic for catalogFinalizer
+			log.Info("ContainsFinalizer is true")
+			// Run finalization logic
 			if err := r.finalizeCatalog(ctx, mysqlClient, catalog); err != nil {
 				log.Error(err, "Failed to finalize Catalog")
 				catalog.Status.Phase = catalogPhaseNotReady
 				catalog.Status.Reason = catalogReasonFailedToFinalize
 				if serr := r.Status().Update(ctx, catalog); serr != nil {
-					log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
+					log.Error(serr, "Failed to update finalization status")
 				}
 				return ctrl.Result{}, err
 			}
@@ -184,7 +185,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		log.Info("Updated successfully after adding finalizer")
 	} else {
-		log.Info("already has finalizer")
+		log.Info("Already has finalizer")
 	}
 
 	// Skip if MySQL is being deleted

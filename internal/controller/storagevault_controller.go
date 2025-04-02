@@ -42,14 +42,14 @@ import (
 
 const (
 	storageVaultFinalizer                   = "storagevault.nakamasato.com/finalizer"
-	storageVaultReasonCompleted             = "Storage vault successfully reconciled"
+	storageVaultReasonCompleted             = "Successfully reconciled"
 	storageVaultReasonMySQLConnectionFailed = "Failed to connect to cluster"
 	storageVaultReasonFailedToCreateVault   = "Failed to create storage vault"
 	storageVaultReasonFailedToGetSecret     = "Failed to get Secret"
 	storageVaultReasonFailedToDropVault     = "Failed to drop storage vault"
 	storageVaultPhaseReady                  = "Ready"
 	storageVaultPhaseNotReady               = "NotReady"
-	storageVaultReasonFailedToFinalize      = "Failed to finalize storage vault"
+	storageVaultReasonFailedToFinalize      = "Failed to finalize"
 	storageVaultReasonMySQLFetchFailed      = "Failed to fetch cluster"
 )
 
@@ -146,13 +146,14 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if !storageVault.GetDeletionTimestamp().IsZero() {
 		log.Info("Resource marked for deletion")
 		if controllerutil.ContainsFinalizer(storageVault, storageVaultFinalizer) {
-			// Run finalization logic for storageVaultFinalizer
+			log.Info("ContainsFinalizer is true")
+			// Run finalization logic
 			if err := r.finalizeStorageVault(ctx, mysqlClient, storageVault); err != nil {
-				log.Error(err, "Failed to finalize StorageVault")
+				log.Error(err, "Failed to finalize")
 				storageVault.Status.Phase = storageVaultPhaseNotReady
 				storageVault.Status.Reason = storageVaultReasonFailedToFinalize
 				if serr := r.Status().Update(ctx, storageVault); serr != nil {
-					log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
+					log.Error(serr, "Failed to update finalization status")
 				}
 				return ctrl.Result{}, err
 			}
@@ -184,7 +185,7 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 		log.Info("Updated successfully after adding finalizer")
 	} else {
-		log.Info("already has finalizer")
+		log.Info("Already has finalizer")
 	}
 
 	// Skip if MySQL is being deleted

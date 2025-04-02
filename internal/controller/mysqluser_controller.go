@@ -44,7 +44,7 @@ import (
 
 const (
 	mysqlUserFinalizer                         = "mysqluser.nakamasato.com/finalizer"
-	mysqlUserReasonCompleted                   = "User are successfully reconciled"
+	mysqlUserReasonCompleted                   = "Successfully reconciled"
 	mysqlUserReasonMySQLConnectionFailed       = "Failed to connect to cluster"
 	mysqlUserReasonMySQLFailedToCreateUser     = "Failed to create user"
 	mysqlUserReasonMySQLFailedToUpdatePassword = "Failed to update password"
@@ -53,6 +53,7 @@ const (
 	mysqlUserReasonMySQLFetchFailed            = "Failed to fetch cluster"
 	mysqlUserPhaseReady                        = "Ready"
 	mysqlUserPhaseNotReady                     = "NotReady"
+	mysqlUserReasonFailedToFinalize            = "Failed to finalize"
 )
 
 // MySQLUserReconciler reconciles a MySQLUser object
@@ -141,29 +142,30 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Finalize if DeletionTimestamp exists
 	if !mysqlUser.GetDeletionTimestamp().IsZero() {
-		log.Info("isMysqlUserMarkedToBeDeleted is true")
+		log.Info("Resource marked for deletion")
 		if controllerutil.ContainsFinalizer(mysqlUser, mysqlUserFinalizer) {
 			log.Info("ContainsFinalizer is true")
-			// Run finalization logic for mysqlUserFinalizer. If the
-			// finalization logic fails, don't remove the finalizer so
-			// that we can retry during the next reconciliation.
+			// Run finalization logic
 			if err := r.finalizeMySQLUser(ctx, mysqlClient, mysqlUser); err != nil {
-				log.Error(err, "Failed to complete finalizeMySQLUser")
+				log.Error(err, "Failed to finalize")
+				mysqlUser.Status.Phase = mysqlUserPhaseNotReady
+				mysqlUser.Status.Reason = mysqlUserReasonFailedToFinalize
+				if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
+					log.Error(serr, "Failed to update finalization status")
+				}
 				return ctrl.Result{}, err
 			}
-			log.Info("finalizeMySQLUser completed")
-			// Remove mysqlUserFinalizer. Once all finalizers have been
-			// removed, the object will be deleted.
-			log.Info("removing finalizer")
+			log.Info("Finalization completed")
+
+			// Remove finalizer
 			if controllerutil.RemoveFinalizer(mysqlUser, mysqlUserFinalizer) {
-				log.Info("RemoveFinalizer completed")
+				log.Info("Removing finalizer")
 				err := r.Update(ctx, mysqlUser)
-				log.Info("Update")
 				if err != nil {
-					log.Error(err, "Failed to update mysqlUser")
+					log.Error(err, "Failed to remove finalizer")
 					return ctrl.Result{}, err
 				}
-				log.Info("Update completed")
+				log.Info("Finalizer removed")
 			}
 			return ctrl.Result{}, nil
 		}
@@ -181,7 +183,7 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		log.Info("Updated successfully after adding finalizer")
 	} else {
-		log.Info("already has finalizer")
+		log.Info("Already has finalizer")
 	}
 
 	// Skip all the following steps if MySQL is being Deleted
