@@ -31,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"maps"
+
 	_ "github.com/go-sql-driver/mysql"
 	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -359,14 +361,12 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 		storageVault.Spec.Name,
 		strings.Join(props, ", "))
 
-	log.Info("Executing create storage vault query")
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "Failed to execute CREATE STORAGE VAULT query")
+		log.Error(err, "Failed to create storage vault", "query", query) // TODO: Remove query once the issue is fixed
 		return err
 	}
 
-	log.Info("Storage vault created successfully")
 	return nil
 }
 
@@ -377,9 +377,7 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 
 	// Initialize properties map with values from the Properties field
 	properties := make(map[string]string)
-	for k, v := range storageVault.Spec.Properties {
-		properties[k] = v
-	}
+	maps.Copy(properties, storageVault.Spec.Properties)
 
 	// If PropertiesSecret is provided, get properties from the secret
 	if storageVault.Spec.PropertiesSecret != "" {
