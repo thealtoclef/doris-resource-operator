@@ -354,7 +354,7 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
 	}
 
-	query := fmt.Sprintf("CREATE STORAGE VAULT IF NOT EXISTS '%s' PROPERTIES (%s)",
+	query := fmt.Sprintf("CREATE STORAGE VAULT IF NOT EXISTS %s PROPERTIES (%s)",
 		storageVault.Spec.Name,
 		strings.Join(props, ", "))
 
@@ -406,7 +406,7 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
 	}
 
-	query := fmt.Sprintf("ALTER STORAGE VAULT '%s' SET PROPERTIES (%s)",
+	query := fmt.Sprintf("ALTER STORAGE VAULT %s SET PROPERTIES (%s)",
 		storageVault.Spec.Name,
 		strings.Join(props, ", "))
 
@@ -439,7 +439,7 @@ func (r *StorageVaultReconciler) handleDefaultVault(ctx context.Context, db *sql
 	// If this vault should be default and isn't currently default
 	if storageVault.Spec.IsDefault != nil && *storageVault.Spec.IsDefault && currentDefault != storageVault.Spec.Name {
 		log.Info("Setting storage vault as default")
-		_, err := db.ExecContext(ctx, fmt.Sprintf("SET DEFAULT STORAGE VAULT '%s'", storageVault.Spec.Name))
+		_, err := db.ExecContext(ctx, fmt.Sprintf("SET DEFAULT STORAGE VAULT %s", storageVault.Spec.Name))
 		if err != nil {
 			return fmt.Errorf("failed to set default storage vault: %w", err)
 		}
