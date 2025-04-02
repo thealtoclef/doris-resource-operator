@@ -79,6 +79,7 @@ type S3Properties struct {
 }
 
 // StorageVaultSpec defines the desired state of StorageVault
+// +kubebuilder:validation:XValidation:rule="self.type != 'S3' || has(self.s3Properties)",message="S3Properties must be provided when Type is S3"
 type StorageVaultSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Cluster name is immutable"
 	// Cluster name to reference to, which decides the destination
@@ -97,7 +98,6 @@ type StorageVaultSpec struct {
 
 	// S3Properties contains configuration for S3 vault type
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:validation:XValidation:rule="self != null || self.Type != 'S3'",message="S3Properties must be provided when Type is S3"
 	S3Properties *S3Properties `json:"s3Properties,omitempty"`
 
 	// IsDefault indicates whether this vault should be set as the default storage vault
