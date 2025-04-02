@@ -113,9 +113,6 @@ spec:
                 - region
                 - rootPath
                 type: object
-                x-kubernetes-validations:
-                - message: S3Properties must be provided when Type is S3
-                  rule: self != null || self.Type != 'S3'
               type:
                 description: Type of storage vault
                 enum:
@@ -127,6 +124,9 @@ spec:
             - name
             - type
             type: object
+            x-kubernetes-validations:
+            - message: S3Properties must be provided when Type is S3
+              rule: self.type != 'S3' || has(self.s3Properties)
           status:
             description: StorageVaultStatus defines the observed state of StorageVault
             properties:
