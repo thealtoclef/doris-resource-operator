@@ -25,7 +25,6 @@ users: []
   #     - privileges:
   #         - USAGE
   #       target: RESOURCE 'test_resource'
-
 storageVaults: []
   # - name: aws_s3_vault
   #   properties:
@@ -38,3 +37,14 @@ storageVaults: []
   #     use_path_style: false
   #   propertiesSecret: aws-s3-vault-secret
   #   isDefault: true
+catalogs: []
+  # - name: postgres_catalog
+  #   comment: PostgreSQL Catalog
+  #   properties:
+  #     type: jdbc
+  #     user: postgres
+  #     password: 123456
+  #     jdbc_url: jdbc:postgresql://127.0.0.1:5432/demo
+  #     driver_url: file:///path/to/postgresql-42.5.1.jar
+  #     driver_class: org.postgresql.Driver
+  #   propertiesSecret: postgres-catalog-secret

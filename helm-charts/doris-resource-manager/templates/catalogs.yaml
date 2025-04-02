@@ -1,0 +1,22 @@
+{{- range .Values.catalogs }}
+---
+apiVersion: mysql.nakamasato.com/v1alpha1
+kind: Catalog
+metadata:
+  name: {{ template "doris-resource-manager.fullname" $ }}-{{ .name | replace "_" "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "doris-resource-manager.labels" $ | nindent 4 }}
+spec:
+  clusterName: {{ template "doris-resource-manager.fullname" $ }}
+  name: {{ .name }}
+  {{- with .comment }}
+  comment: {{ . }}
+  {{- end }}
+  {{- with .properties }}
+  properties:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .propertiesSecret }}
+  propertiesSecret: {{ . }}
+  {{- end }}
+{{- end }}
