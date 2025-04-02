@@ -9,12 +9,10 @@ metadata:
 spec:
   clusterName: {{ template "doris-resource-manager.fullname" $ }}
   name: {{ .name }}
-  {{- with .properties }}
-  properties:
+  type: {{ .type }}
+  {{- with .s3Properties }}
+  s3Properties:
     {{- toYaml . | nindent 4 }}
-  {{- end }}
-  {{- with .propertiesSecret }}
-  propertiesSecret: {{ . }}
   {{- end }}
   isDefault: {{ default false .isDefault }}
 {{- end }}

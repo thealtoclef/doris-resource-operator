@@ -27,15 +27,15 @@ users: []
   #       target: RESOURCE 'test_resource'
 storageVaults: []
   # - name: aws_s3_vault
-  #   properties:
-  #     type: S3
-  #     s3.endpoint: s3.us-east-1.amazonaws.com
-  #     s3.region: us-east-1
-  #     s3.root.path: s3_vault_prefix
-  #     s3.bucket: my-bucket
+  #   type: S3
+  #   s3Properties:
+  #     endpoint: s3.us-east-1.amazonaws.com
+  #     region: us-east-1
+  #     authSecret: aws-s3-vault-secret
+  #     rootPath: s3_vault_prefix
+  #     bucket: my-bucket
   #     provider: S3
-  #     use_path_style: false
-  #   propertiesSecret: aws-s3-vault-secret
+  #     usePathStyle: false
   #   isDefault: true
 catalogs: []
   # - name: postgres_catalog
