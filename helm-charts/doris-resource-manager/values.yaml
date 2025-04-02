@@ -27,20 +27,14 @@ users: []
   #       target: RESOURCE 'test_resource'
 
 storageVaults: []
-  # Example S3 Storage Vault
-  # - name: s3_vault
-  #   type: S3
-  #   s3Properties:
-  #     provider: S3  # Options: S3, OSS, COS, OBS, BOS, AZURE, GCP
-  #     endpoint: s3.amazonaws.com
-  #     region: us-east-1
-  #     accessKeySecretRef:
-  #       name: s3-vault-credentials
-  #       key: access_key
-  #     secretKeySecretRef:
-  #       name: s3-vault-credentials
-  #       key: secret_key
-  #     bucket: my-bucket
-  #     rootPath: s3_vault
-  #     usePathStyle: true
-  #   isDefault: true  # Optional: Set this vault as the default storage vault
+  # - name: aws_s3_vault
+  #   properties:
+  #     type: S3
+  #     s3.endpoint: s3.us-east-1.amazonaws.com
+  #     s3.region: us-east-1
+  #     s3.root.path: s3_vault_prefix
+  #     s3.bucket: my-bucket
+  #     provider: S3
+  #     use_path_style: false
+  #   propertiesSecret: aws-s3-vault-secret
+  #   isDefault: true
