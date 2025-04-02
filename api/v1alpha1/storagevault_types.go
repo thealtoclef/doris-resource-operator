@@ -55,26 +55,33 @@ const (
 // S3Properties defines the properties for an S3 storage vault
 type S3Properties struct {
 	// Endpoint is the S3 endpoint
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Endpoint is immutable"
 	Endpoint string `json:"endpoint"`
 
 	// Region is the S3 region
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Region is immutable"
 	Region string `json:"region"`
 
 	// RootPath is the path where the data would be stored
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="RootPath is immutable"
 	RootPath string `json:"rootPath"`
 
 	// Bucket is the S3 bucket name (StorageAccount for Azure)
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Bucket is immutable"
 	Bucket string `json:"bucket"`
 
 	// AuthSecret is the name of the Kubernetes secret containing access_key and secret_key
+	// This field is mutable to allow credential rotation
 	AuthSecret string `json:"authSecret"`
 
 	// Provider is the cloud vendor which provides the object storage service
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Provider is immutable"
 	Provider S3Provider `json:"provider"`
 
 	// +kubebuilder:default=true
 
 	// UsePathStyle indicates using path-style URL (true) or virtual-hosted-style URL (false)
+	// This field is mutable to allow changing the URL style
 	UsePathStyle *bool `json:"usePathStyle,omitempty"`
 }
 
@@ -90,10 +97,12 @@ type StorageVaultSpec struct {
 	// +kubebuilder:validation:MaxLength=64
 	// +kubebuilder:validation:Required
 	// Name of the storage vault
+	// This field is mutable to allow renaming the storage vault
 	Name string `json:"name"`
 
 	// Type of storage vault
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Type is immutable"
 	Type VaultType `json:"type"`
 
 	// S3Properties contains configuration for S3 vault type

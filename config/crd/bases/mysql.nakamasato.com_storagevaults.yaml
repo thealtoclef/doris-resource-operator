@@ -64,7 +64,9 @@ spec:
                   as the default storage vault
                 type: boolean
               name:
-                description: Name of the storage vault
+                description: |-
+                  Name of the storage vault
+                  This field is mutable to allow renaming the storage vault
                 maxLength: 64
                 pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
                 type: string
@@ -72,16 +74,23 @@ spec:
                 description: S3Properties contains configuration for S3 vault type
                 properties:
                   authSecret:
-                    description: AuthSecret is the name of the Kubernetes secret containing
-                      access_key and secret_key
+                    description: |-
+                      AuthSecret is the name of the Kubernetes secret containing access_key and secret_key
+                      This field is mutable to allow credential rotation
                     type: string
                   bucket:
                     description: Bucket is the S3 bucket name (StorageAccount for
                       Azure)
                     type: string
+                    x-kubernetes-validations:
+                    - message: Bucket is immutable
+                      rule: self == oldSelf
                   endpoint:
                     description: Endpoint is the S3 endpoint
                     type: string
+                    x-kubernetes-validations:
+                    - message: Endpoint is immutable
+                      rule: self == oldSelf
                   provider:
                     description: Provider is the cloud vendor which provides the object
                       storage service
@@ -94,16 +103,26 @@ spec:
                     - AZURE
                     - GCP
                     type: string
+                    x-kubernetes-validations:
+                    - message: Provider is immutable
+                      rule: self == oldSelf
                   region:
                     description: Region is the S3 region
                     type: string
+                    x-kubernetes-validations:
+                    - message: Region is immutable
+                      rule: self == oldSelf
                   rootPath:
                     description: RootPath is the path where the data would be stored
                     type: string
+                    x-kubernetes-validations:
+                    - message: RootPath is immutable
+                      rule: self == oldSelf
                   usePathStyle:
                     default: true
-                    description: UsePathStyle indicates using path-style URL (true)
-                      or virtual-hosted-style URL (false)
+                    description: |-
+                      UsePathStyle indicates using path-style URL (true) or virtual-hosted-style URL (false)
+                      This field is mutable to allow changing the URL style
                     type: boolean
                 required:
                 - authSecret
@@ -119,6 +138,9 @@ spec:
                 - S3
                 - HDFS
                 type: string
+                x-kubernetes-validations:
+                - message: Type is immutable
+                  rule: self == oldSelf
             required:
             - clusterName
             - name

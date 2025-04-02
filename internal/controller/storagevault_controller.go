@@ -411,29 +411,20 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	// Initialize properties map for the update
 	properties := make(map[string]string)
 
-	// Check if we're trying to rename the vault
+	// Type is required in the ALTER command even though it's immutable
+	vaultType := string(storageVault.Spec.Type)
+	properties["type"] = vaultType
+
+	// Check if the vault name is changed
 	if storageVault.Spec.Name != storageVault.Name {
 		properties["VAULT_NAME"] = storageVault.Spec.Name
-	}
-
-	// The type is immutable, so we don't include it in the update
-	vaultType := currentProperties["type"]
-	if vaultType == "" {
-		// If type is not found in current properties, use the one from spec
-		vaultType = string(storageVault.Spec.Type)
 	}
 
 	// Set properties based on the vault type
 	switch mysqlv1alpha1.VaultType(vaultType) {
 	case mysqlv1alpha1.S3VaultType:
-		// Add S3 properties
+		// Add S3 properties that can be modified
 		s3Props := storageVault.Spec.S3Properties
-		properties["s3.endpoint"] = s3Props.Endpoint
-		properties["s3.region"] = s3Props.Region
-		properties["s3.root.path"] = s3Props.RootPath
-		properties["s3.bucket"] = s3Props.Bucket
-		properties["provider"] = string(s3Props.Provider)
-
 		if s3Props.UsePathStyle != nil {
 			properties["use_path_style"] = fmt.Sprintf("%t", *s3Props.UsePathStyle)
 		}
@@ -449,21 +440,27 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 			return fmt.Errorf("failed to get auth secret: %w", err)
 		}
 
-		// Get access_key - Always update this as it might have changed
+		// Get access_key from secret
 		accessKey, ok := secret.Data[s3AccessKeyField]
 		if !ok {
 			return fmt.Errorf("auth secret missing required field: %s", s3AccessKeyField)
 		}
-		properties["s3.access_key"] = string(accessKey)
 
-		// Get secret_key - Only add it if it's different from what's in Doris
-		// Note: secret_key is masked in SHOW STORAGE VAULTS, so we can't compare it
-		// We'll always update it to ensure consistency
+		// Get secret_key from secret
 		secretKey, ok := secret.Data[s3SecretKeyField]
 		if !ok {
 			return fmt.Errorf("auth secret missing required field: %s", s3SecretKeyField)
 		}
-		properties["s3.secret_key"] = string(secretKey)
+
+		// Compare access key with current (if available)
+		currentAccessKey, hasCurrentAccessKey := currentProperties["s3.access_key"]
+		if !hasCurrentAccessKey || currentAccessKey != string(accessKey) {
+			log.Info("Access key has changed, updating both access key and secret key")
+			properties["s3.access_key"] = string(accessKey)
+			properties["s3.secret_key"] = string(secretKey)
+		} else {
+			log.Info("Access key unchanged, assuming secret key also unchanged")
+		}
 
 	case mysqlv1alpha1.HDFSVaultType:
 		// HDFS support to be implemented in the future
@@ -485,7 +482,7 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 		return nil
 	}
 
-	query := fmt.Sprintf("ALTER STORAGE VAULT %s SET PROPERTIES (%s)",
+	query := fmt.Sprintf("ALTER STORAGE VAULT %s PROPERTIES (%s)",
 		storageVault.Spec.Name,
 		strings.Join(props, ", "))
 
@@ -522,29 +519,15 @@ func (r *StorageVaultReconciler) getStorageVaultProperties(ctx context.Context, 
 			// Parse the properties string
 			properties := make(map[string]string)
 
-			// Basic parsing of key-value pairs
-			// This is a simplified version and might need enhancement based on the exact format
-			propParts := strings.Split(propertiesStr, " ")
-			for i := 0; i < len(propParts); i++ {
-				if i+1 < len(propParts) && strings.HasSuffix(propParts[i], ":") {
-					key := strings.TrimSuffix(propParts[i], ":")
-					value := propParts[i+1]
-
-					// Handle quoted values
-					if strings.HasPrefix(value, "\"") && !strings.HasSuffix(value, "\"") {
-						j := i + 2
-						for ; j < len(propParts); j++ {
-							value += " " + propParts[j]
-							if strings.HasSuffix(propParts[j], "\"") {
-								break
-							}
-						}
-						i = j
-					} else {
-						i++
-					}
-
-					// Clean up value
+			// More robust parsing of key-value pairs
+			// Properties are typically in format "key: value"
+			pairs := strings.Split(propertiesStr, ", ")
+			for _, pair := range pairs {
+				parts := strings.SplitN(pair, ": ", 2)
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0])
+					value := strings.TrimSpace(parts[1])
+					// Remove quotes if present
 					value = strings.Trim(value, "\"")
 					properties[key] = value
 				}
