@@ -165,13 +165,13 @@ func main() {
 	indexFunc := func(obj client.Object) []string {
 		return []string{obj.(*mysqlv1alpha1.MySQLUser).Spec.ClusterName}
 	}
-	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.MySQLUser{}, "spec.clusterlName", indexFunc); err != nil {
+	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.MySQLUser{}, "spec.clusterName", indexFunc); err != nil {
 		panic(err)
 	}
 	indexFunc = func(obj client.Object) []string {
 		return []string{obj.(*mysqlv1alpha1.StorageVault).Spec.ClusterName}
 	}
-	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.StorageVault{}, "spec.clusterlName", indexFunc); err != nil {
+	if err := cache.IndexField(context.TODO(), &mysqlv1alpha1.StorageVault{}, "spec.clusterName", indexFunc); err != nil {
 		panic(err)
 	}
 
