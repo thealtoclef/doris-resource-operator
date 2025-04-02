@@ -4,7 +4,7 @@
 
 host: ~
 port: 9030
-rootPasswordFromSecret: ~
+authSecret: ~
 users: []
   # - username: test_user
   #   passwordSecretRef:

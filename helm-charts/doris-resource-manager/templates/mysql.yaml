@@ -7,9 +7,4 @@ metadata:
 spec:
   host: {{ .Values.host }}
   port: {{ .Values.port }}
-  adminUser:
-    name: root
-    type: raw
-  adminPassword:
-    name: {{ .Values.rootPasswordFromSecret }}
-    type: k8s
+  authSecret: {{ .Values.authSecret }}
