@@ -20,7 +20,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -323,70 +322,29 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Creating new storage vault")
 
-	// Build properties map
+	// Initialize properties map with values from the Properties field
 	properties := make(map[string]string)
-	if storageVault.Spec.S3Properties != nil {
-		s3Props := storageVault.Spec.S3Properties
-		properties["s3.endpoint"] = s3Props.Endpoint
-		properties["s3.region"] = s3Props.Region
-		properties["s3.root.path"] = s3Props.RootPath
-		properties["s3.bucket"] = s3Props.Bucket
-		properties["provider"] = string(s3Props.Provider)
-		if s3Props.UsePathStyle != nil {
-			properties["use_path_style"] = strconv.FormatBool(*s3Props.UsePathStyle)
-		}
+	for k, v := range storageVault.Spec.Properties {
+		properties[k] = v
 	}
 
-	// If S3 type, get credentials from secret
-	if storageVault.Spec.Type == mysqlv1alpha1.S3Vault && storageVault.Spec.S3Properties != nil {
-		// Get access key from secret if provided
-		if storageVault.Spec.S3Properties.AccessKeySecretRef != nil {
-			accessKeySecret := &v1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{
-				Namespace: storageVault.Namespace,
-				Name:      storageVault.Spec.S3Properties.AccessKeySecretRef.Name,
-			}, accessKeySecret)
-			if err != nil {
-				log.Error(err, "Failed to get access key secret",
-					"secretName", storageVault.Spec.S3Properties.AccessKeySecretRef.Name)
-				return fmt.Errorf("failed to get access key secret: %w", err)
-			}
-
-			// Add access key to properties
-			if accessKey, ok := accessKeySecret.Data[storageVault.Spec.S3Properties.AccessKeySecretRef.Key]; ok {
-				properties["s3.access_key"] = string(accessKey)
-				log.Info("Access key retrieved successfully")
-			} else {
-				log.Error(nil, "Access key not found in secret",
-					"key", storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
-				return fmt.Errorf("access key not found in secret using key %s",
-					storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
-			}
+	// If PropertiesSecret is provided, get properties from the secret
+	if storageVault.Spec.PropertiesSecret != "" {
+		propertiesSecret := &v1.Secret{}
+		err := r.Get(ctx, types.NamespacedName{
+			Namespace: storageVault.Namespace,
+			Name:      storageVault.Spec.PropertiesSecret,
+		}, propertiesSecret)
+		if err != nil {
+			log.Error(err, "Failed to get properties secret",
+				"secretName", storageVault.Spec.PropertiesSecret)
+			return fmt.Errorf("failed to get properties secret: %w", err)
 		}
 
-		// Get secret key from secret if provided
-		if storageVault.Spec.S3Properties.SecretKeySecretRef != nil {
-			secretKeySecret := &v1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{
-				Namespace: storageVault.Namespace,
-				Name:      storageVault.Spec.S3Properties.SecretKeySecretRef.Name,
-			}, secretKeySecret)
-			if err != nil {
-				log.Error(err, "Failed to get secret key secret",
-					"secretName", storageVault.Spec.S3Properties.SecretKeySecretRef.Name)
-				return fmt.Errorf("failed to get secret key secret: %w", err)
-			}
-
-			// Add secret key to properties
-			if secretKey, ok := secretKeySecret.Data[storageVault.Spec.S3Properties.SecretKeySecretRef.Key]; ok {
-				properties["s3.secret_key"] = string(secretKey)
-				log.Info("Secret key retrieved successfully")
-			} else {
-				log.Error(nil, "Secret key not found in secret",
-					"key", storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
-				return fmt.Errorf("secret key not found in secret using key %s",
-					storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
-			}
+		// Add all properties from the secret
+		for k, v := range propertiesSecret.Data {
+			properties[k] = string(v)
+			log.Info("Property retrieved from secret", "key", k)
 		}
 	}
 
@@ -416,70 +374,29 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Updating storage vault")
 
-	// Build properties map
+	// Initialize properties map with values from the Properties field
 	properties := make(map[string]string)
-	if storageVault.Spec.S3Properties != nil {
-		s3Props := storageVault.Spec.S3Properties
-		properties["s3.endpoint"] = s3Props.Endpoint
-		properties["s3.region"] = s3Props.Region
-		properties["s3.root.path"] = s3Props.RootPath
-		properties["s3.bucket"] = s3Props.Bucket
-		properties["provider"] = string(s3Props.Provider)
-		if s3Props.UsePathStyle != nil {
-			properties["use_path_style"] = strconv.FormatBool(*s3Props.UsePathStyle)
-		}
+	for k, v := range storageVault.Spec.Properties {
+		properties[k] = v
 	}
 
-	// If S3 type, get credentials from secret
-	if storageVault.Spec.Type == mysqlv1alpha1.S3Vault && storageVault.Spec.S3Properties != nil {
-		// Get access key from secret if provided
-		if storageVault.Spec.S3Properties.AccessKeySecretRef != nil {
-			accessKeySecret := &v1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{
-				Namespace: storageVault.Namespace,
-				Name:      storageVault.Spec.S3Properties.AccessKeySecretRef.Name,
-			}, accessKeySecret)
-			if err != nil {
-				log.Error(err, "Failed to get access key secret",
-					"secretName", storageVault.Spec.S3Properties.AccessKeySecretRef.Name)
-				return fmt.Errorf("failed to get access key secret: %w", err)
-			}
-
-			// Add access key to properties
-			if accessKey, ok := accessKeySecret.Data[storageVault.Spec.S3Properties.AccessKeySecretRef.Key]; ok {
-				properties["s3.access_key"] = string(accessKey)
-				log.Info("Access key retrieved successfully")
-			} else {
-				log.Error(nil, "Access key not found in secret",
-					"key", storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
-				return fmt.Errorf("access key not found in secret using key %s",
-					storageVault.Spec.S3Properties.AccessKeySecretRef.Key)
-			}
+	// If PropertiesSecret is provided, get properties from the secret
+	if storageVault.Spec.PropertiesSecret != "" {
+		propertiesSecret := &v1.Secret{}
+		err := r.Get(ctx, types.NamespacedName{
+			Namespace: storageVault.Namespace,
+			Name:      storageVault.Spec.PropertiesSecret,
+		}, propertiesSecret)
+		if err != nil {
+			log.Error(err, "Failed to get properties secret",
+				"secretName", storageVault.Spec.PropertiesSecret)
+			return fmt.Errorf("failed to get properties secret: %w", err)
 		}
 
-		// Get secret key from secret if provided
-		if storageVault.Spec.S3Properties.SecretKeySecretRef != nil {
-			secretKeySecret := &v1.Secret{}
-			err := r.Get(ctx, types.NamespacedName{
-				Namespace: storageVault.Namespace,
-				Name:      storageVault.Spec.S3Properties.SecretKeySecretRef.Name,
-			}, secretKeySecret)
-			if err != nil {
-				log.Error(err, "Failed to get secret key secret",
-					"secretName", storageVault.Spec.S3Properties.SecretKeySecretRef.Name)
-				return fmt.Errorf("failed to get secret key secret: %w", err)
-			}
-
-			// Add secret key to properties
-			if secretKey, ok := secretKeySecret.Data[storageVault.Spec.S3Properties.SecretKeySecretRef.Key]; ok {
-				properties["s3.secret_key"] = string(secretKey)
-				log.Info("Secret key retrieved successfully")
-			} else {
-				log.Error(nil, "Secret key not found in secret",
-					"key", storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
-				return fmt.Errorf("secret key not found in secret using key %s",
-					storageVault.Spec.S3Properties.SecretKeySecretRef.Key)
-			}
+		// Add all properties from the secret
+		for k, v := range propertiesSecret.Data {
+			properties[k] = string(v)
+			log.Info("Property retrieved from secret", "key", k)
 		}
 	}
 
@@ -504,6 +421,7 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	return nil
 }
 
+// handleDefaultVault handles setting the default storage vault
 func (r *StorageVaultReconciler) handleDefaultVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault) error {
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	// Get current default vault

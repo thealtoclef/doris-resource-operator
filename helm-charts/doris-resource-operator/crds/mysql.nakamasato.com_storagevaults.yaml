@@ -68,83 +68,19 @@ spec:
                 maxLength: 64
                 pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
                 type: string
-              s3Properties:
-                description: S3Properties defines the properties for S3-compatible
-                  storage vault
-                properties:
-                  accessKeySecretRef:
-                    description: AccessKeySecretRef is the secret reference for the
-                      S3 access key
-                    properties:
-                      key:
-                        type: string
-                      name:
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                  bucket:
-                    description: Bucket is the bucket of your object storage account
-                    type: string
-                  endpoint:
-                    description: Endpoint is the endpoint used for object storage
-                      (without http:// or https://)
-                    type: string
-                  provider:
-                    description: Provider is the cloud vendor providing the object
-                      storage service
-                    enum:
-                    - S3
-                    - OSS
-                    - COS
-                    - OBS
-                    - BOS
-                    - AZURE
-                    - GCP
-                    type: string
-                  region:
-                    description: Region is the region of your bucket
-                    type: string
-                  rootPath:
-                    description: RootPath is the path where the data would be stored
-                    type: string
-                  secretKeySecretRef:
-                    description: SecretKeySecretRef is the secret reference for the
-                      S3 secret key
-                    properties:
-                      key:
-                        type: string
-                      name:
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                  usePathStyle:
-                    default: true
-                    description: UsePathStyle indicates whether to use path-style
-                      URL
-                    type: boolean
-                required:
-                - bucket
-                - endpoint
-                - provider
-                - region
-                - rootPath
+              properties:
+                additionalProperties:
+                  type: string
+                description: Properties defines the direct key-value properties for
+                  the storage vault
                 type: object
-              type:
-                description: Type of storage vault (only S3 is supported)
-                enum:
-                - S3
+              propertiesSecret:
+                description: PropertiesSecret is the name of the Kubernetes secret
+                  containing additional properties
                 type: string
-                x-kubernetes-validations:
-                - message: HDFS storage vault is not supported yet
-                  rule: self != 'HDFS'
             required:
             - clusterName
             - name
-            - type
             type: object
           status:
             description: StorageVaultStatus defines the observed state of StorageVault
