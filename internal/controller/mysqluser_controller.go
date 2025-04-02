@@ -746,19 +746,15 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 
 	// Revoke obsolete grants
 	if len(grantsToRevoke) > 0 {
-		log.Info("Revoking obsolete grants")
 		revokeErr := r.revokePrivileges(ctx, mysqlClient, userIdentity, grantsToRevoke)
 		if revokeErr != nil {
 			log.Error(revokeErr, "Failed to revoke privileges")
 			return revokeErr
 		}
-	} else {
-		log.Info("No grants to revoke")
 	}
 
 	// Grant missing grants
 	if len(grantsToAdd) > 0 {
-		log.Info("Adding new grants")
 		for _, grant := range grantsToAdd {
 			grantErr := r.grantPrivileges(ctx, mysqlClient, userIdentity, grant)
 			if grantErr != nil {
@@ -766,8 +762,6 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 				return grantErr
 			}
 		}
-	} else {
-		log.Info("No grants to add")
 	}
 
 	return nil
