@@ -363,7 +363,7 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "Failed to create storage vault", "query", query) // TODO: Remove query once the issue is fixed
+		log.Error(err, "Failed to create storage vault")
 		return err
 	}
 
