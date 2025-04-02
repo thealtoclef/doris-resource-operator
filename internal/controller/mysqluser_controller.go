@@ -129,7 +129,13 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
 		}
-		return ctrl.Result{}, err //requeue
+		// If MySQL client not found, requeue with a delay to wait for MySQL controller to initialize it
+		if err == mysqlinternal.ErrMySQLClientNotFound {
+			log.Info("[MySQLClient] MySQL client not found, waiting for MySQL controller to initialize", "key", mysql.GetKey())
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		// For other errors, requeue immediately
+		return ctrl.Result{}, err
 	}
 	log.Info("[MySQLClient] Successfully connected")
 
