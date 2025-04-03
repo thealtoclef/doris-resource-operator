@@ -56,6 +56,11 @@ const (
 	ReasonFailedToCreateVault   = "Failed to create vault"
 	ReasonFailedToUpdateVault   = "Failed to update vault"
 	ReasonMultipleDefaultVaults = "Multiple default storage vaults defined - only one allowed"
+
+	// WorkloadGroup-specific reason constants
+	ReasonFailedToCreateWorkloadGroup = "Failed to create workload group"
+	ReasonFailedToDropWorkloadGroup   = "Failed to drop workload group"
+	ReasonFailedToUpdateWorkloadGroup = "Failed to update workload group"
 )
 
 // Annotation constants

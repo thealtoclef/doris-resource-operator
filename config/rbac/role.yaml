@@ -125,3 +125,29 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - workloadgroups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - workloadgroups/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - workloadgroups/status
+  verbs:
+  - get
+  - patch
+  - update

@@ -21,6 +21,11 @@ type CatalogTotalAdaptor struct {
 	metric prometheus.Counter
 }
 
+// WorkloadGroupTotalAdaptor is a wrapper for prometheus Counter metrics
+type WorkloadGroupTotalAdaptor struct {
+	metric prometheus.Counter
+}
+
 func (m MysqlUserTotalAdaptor) Increment() {
 	m.metric.Inc()
 }
@@ -30,6 +35,10 @@ func (m StorageVaultTotalAdaptor) Increment() {
 }
 
 func (m CatalogTotalAdaptor) Increment() {
+	m.metric.Inc()
+}
+
+func (m WorkloadGroupTotalAdaptor) Increment() {
 	m.metric.Inc()
 }
 
@@ -82,6 +91,22 @@ var (
 		},
 	)
 
+	workloadGroupCreatedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: MetricsNamespace,
+			Name:      "workload_group_created_total",
+			Help:      "Number of created Workload Groups",
+		},
+	)
+
+	workloadGroupDeletedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: MetricsNamespace,
+			Name:      "workload_group_deleted_total",
+			Help:      "Number of deleted Workload Groups",
+		},
+	)
+
 	MysqlUserCreatedTotal *MysqlUserTotalAdaptor = &MysqlUserTotalAdaptor{metric: userCreatedTotal}
 	MysqlUserDeletedTotal *MysqlUserTotalAdaptor = &MysqlUserTotalAdaptor{metric: mysqlUserDeletedTotal}
 
@@ -90,6 +115,9 @@ var (
 
 	CatalogCreatedTotal *CatalogTotalAdaptor = &CatalogTotalAdaptor{metric: catalogCreatedTotal}
 	CatalogDeletedTotal *CatalogTotalAdaptor = &CatalogTotalAdaptor{metric: catalogDeletedTotal}
+
+	WorkloadGroupCreatedTotal *WorkloadGroupTotalAdaptor = &WorkloadGroupTotalAdaptor{metric: workloadGroupCreatedTotal}
+	WorkloadGroupDeletedTotal *WorkloadGroupTotalAdaptor = &WorkloadGroupTotalAdaptor{metric: workloadGroupDeletedTotal}
 )
 
 func init() {
@@ -101,5 +129,7 @@ func init() {
 		storageVaultDeletedTotal,
 		catalogCreatedTotal,
 		catalogDeletedTotal,
+		workloadGroupCreatedTotal,
+		workloadGroupDeletedTotal,
 	)
 }
