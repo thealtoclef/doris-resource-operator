@@ -23,9 +23,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -346,26 +344,6 @@ func (r *WorkloadGroupReconciler) createWorkloadGroup(ctx context.Context, db *s
 	properties := make(map[string]string)
 	maps.Copy(properties, workloadGroup.Spec.Properties)
 
-	// If PropertiesSecret is provided, get properties from the secret
-	if workloadGroup.Spec.PropertiesSecret != "" {
-		propertiesSecret := &v1.Secret{}
-		err := r.Get(ctx, types.NamespacedName{
-			Namespace: workloadGroup.Namespace,
-			Name:      workloadGroup.Spec.PropertiesSecret,
-		}, propertiesSecret)
-		if err != nil {
-			log.Error(err, "Failed to get properties secret",
-				"secretName", workloadGroup.Spec.PropertiesSecret)
-			return fmt.Errorf("failed to get properties secret: %w", err)
-		}
-
-		// Add all properties from the secret
-		for k, v := range propertiesSecret.Data {
-			properties[k] = string(v)
-			log.Info("Property retrieved from secret", "key", k)
-		}
-	}
-
 	// Ensure required properties are present
 	requiredProps := []string{"cpu_share", "memory_limit"}
 	missingProps := []string{}
@@ -418,26 +396,6 @@ func (r *WorkloadGroupReconciler) updateWorkloadGroup(ctx context.Context, db *s
 	// Initialize desired properties map with values from the Properties field
 	desiredProps := make(map[string]string)
 	maps.Copy(desiredProps, workloadGroup.Spec.Properties)
-
-	// If PropertiesSecret is provided, get properties from the secret
-	if workloadGroup.Spec.PropertiesSecret != "" {
-		propertiesSecret := &v1.Secret{}
-		err := r.Get(ctx, types.NamespacedName{
-			Namespace: workloadGroup.Namespace,
-			Name:      workloadGroup.Spec.PropertiesSecret,
-		}, propertiesSecret)
-		if err != nil {
-			log.Error(err, "Failed to get properties secret",
-				"secretName", workloadGroup.Spec.PropertiesSecret)
-			return fmt.Errorf("failed to get properties secret: %w", err)
-		}
-
-		// Add all properties from the secret
-		for k, v := range propertiesSecret.Data {
-			desiredProps[k] = string(v)
-			log.Info("Property retrieved from secret", "key", k)
-		}
-	}
 
 	// Check if properties need updating by comparing current vs desired
 	propsToUpdate := make(map[string]string)

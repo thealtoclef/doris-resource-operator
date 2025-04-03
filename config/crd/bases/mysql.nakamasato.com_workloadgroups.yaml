@@ -69,10 +69,6 @@ spec:
                 description: Properties defines the direct key-value properties for
                   the workload group
                 type: object
-              propertiesSecret:
-                description: PropertiesSecret is the name of the Kubernetes secret
-                  containing additional properties
-                type: string
             required:
             - clusterName
             - name

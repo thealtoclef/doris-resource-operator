@@ -36,10 +36,6 @@ type WorkloadGroupSpec struct {
 	// Properties defines the direct key-value properties for the workload group
 	// +kubebuilder:validation:Optional
 	Properties map[string]string `json:"properties,omitempty"`
-
-	// PropertiesSecret is the name of the Kubernetes secret containing additional properties
-	// +kubebuilder:validation:Optional
-	PropertiesSecret string `json:"propertiesSecret,omitempty"`
 }
 
 // WorkloadGroupStatus defines the observed state of WorkloadGroup

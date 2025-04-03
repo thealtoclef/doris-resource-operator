@@ -13,7 +13,4 @@ spec:
   properties:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  {{- with .propertiesSecret }}
-  propertiesSecret: {{ . }}
-  {{- end }}
 {{- end }}
