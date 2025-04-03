@@ -66,4 +66,5 @@ const (
 // Annotation constants
 const (
 	StorageVaultLastKnownNameAnnotation = "mysql.nakamasato.com/last-known-vault-name"
+	CatalogLastKnownNameAnnotation      = "mysql.nakamasato.com/last-known-catalog-name"
 )

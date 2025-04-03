@@ -167,10 +167,14 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil // Return success but skip further reconciliation
 	}
 
-	// Check if catalog exists
-	exists, err := r.catalogExists(ctx, mysqlClient, catalog.Spec.Name)
+	// Get the last known catalog name that was successfully created/updated in Doris
+	catalogNameInDoris := r.getLastKnownCatalogName(catalog)
+	log.Info("Catalog name tracking", "specName", catalog.Spec.Name, "lastKnownName", catalogNameInDoris)
+
+	// Check if catalog exists - use the last known name to check
+	exists, err := r.catalogExists(ctx, mysqlClient, catalogNameInDoris)
 	if err != nil {
-		log.Error(err, "[Catalog] Failed to check if catalog exists", "clusterName", clusterName, "catalogName", catalog.Spec.Name)
+		log.Error(err, "[Catalog] Failed to check if catalog exists", "clusterName", clusterName, "catalogName", catalogNameInDoris)
 		catalog.Status.Phase = constants.PhaseNotReady
 		catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
 		if serr := r.Status().Update(ctx, catalog); serr != nil {
@@ -199,7 +203,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		metrics.CatalogCreatedTotal.Increment()
 	} else {
 		// Catalog exists, fetch properties for comparison and update if needed
-		_, err := r.getCatalogProperties(ctx, mysqlClient, catalog.Spec.Name)
+		_, err := r.getCatalogProperties(ctx, mysqlClient, catalogNameInDoris)
 		if err != nil {
 			log.Error(err, "Failed to fetch catalog properties")
 			catalog.Status.Phase = constants.PhaseNotReady
@@ -213,8 +217,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		catalog.Status.CatalogCreated = true
 
-		// Update catalog if exists
-		if err := r.updateCatalog(ctx, mysqlClient, catalog); err != nil {
+		// Update catalog if exists - using the last known name
+		if err := r.updateCatalog(ctx, mysqlClient, catalog, catalogNameInDoris); err != nil {
 			log.Error(err, "Failed to update catalog")
 			catalog.Status.Phase = constants.PhaseNotReady
 			catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
@@ -230,6 +234,19 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Update status
 	catalog.Status.Phase = constants.PhaseReady
 	catalog.Status.Reason = constants.ReasonCompleted
+
+	// Update the last known catalog name annotation for successful operations
+	if catalog.Status.CatalogCreated {
+		r.updateLastKnownCatalogName(catalog)
+	}
+
+	// Save all changes - both status and annotations
+	if err := r.Update(ctx, catalog); err != nil {
+		log.Error(err, "Failed to update Catalog resource", "catalog", catalog.Name)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+
+	// Also update status separately in case the above update didn't apply status changes
 	if serr := r.Status().Update(ctx, catalog); serr != nil {
 		log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -247,7 +264,9 @@ func (r *CatalogReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // finalizeCatalog drops the catalog from Doris
 func (r *CatalogReconciler) finalizeCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog) error {
-	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", catalog.Spec.Name)
+	// Get the last known catalog name that was successfully created/updated in Doris
+	catalogNameInDoris := r.getLastKnownCatalogName(catalog)
+	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", catalogNameInDoris)
 	log.Info("Finalization requested")
 
 	if !catalog.Status.CatalogCreated {
@@ -256,13 +275,13 @@ func (r *CatalogReconciler) finalizeCatalog(ctx context.Context, db *sql.DB, cat
 	}
 
 	// Check if we can drop the catalog - the internal catalog cannot be dropped
-	if catalog.Spec.Name == "internal" {
+	if catalogNameInDoris == "internal" {
 		log.Info("Cannot drop the internal catalog, skipping finalization")
 		return nil
 	}
 
 	// Execute DROP CATALOG statement
-	query := fmt.Sprintf("DROP CATALOG IF EXISTS `%s`", catalog.Spec.Name)
+	query := fmt.Sprintf("DROP CATALOG IF EXISTS %s", catalogNameInDoris)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to drop catalog")
@@ -315,7 +334,7 @@ func (r *CatalogReconciler) getCatalogProperties(ctx context.Context, db *sql.DB
 
 	var catalogName string
 	var createCatalogStmt string
-	err := db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG `%s`", name)).Scan(&catalogName, &createCatalogStmt)
+	err := db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG %s", name)).Scan(&catalogName, &createCatalogStmt)
 	if err != nil {
 		log.Error(err, "Failed to get catalog properties with SHOW CREATE CATALOG")
 		return "", err
@@ -364,12 +383,12 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 	// Build the CREATE CATALOG query
 	var query string
 	if catalog.Spec.Comment != "" {
-		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS `%s` COMMENT '%s' PROPERTIES (%s)",
+		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS %s COMMENT '%s' PROPERTIES (%s)",
 			catalog.Spec.Name,
 			catalog.Spec.Comment,
 			strings.Join(props, ", "))
 	} else {
-		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS `%s` PROPERTIES (%s)",
+		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS %s PROPERTIES (%s)",
 			catalog.Spec.Name,
 			strings.Join(props, ", "))
 	}
@@ -386,7 +405,7 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 }
 
 // updateCatalog updates an existing catalog in Doris
-func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog) error {
+func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog, catalogNameInDoris string) error {
 	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", catalog.Spec.Name)
 	log.Info("Updating catalog")
 
@@ -420,34 +439,32 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 		}
 	}
 
-	// Skip update if no properties to update
-	if len(properties) == 0 {
-		log.Info("No properties to update")
-		return nil
+	// Update properties if there are any to update
+	if len(properties) > 0 {
+		// Build properties string
+		props := make([]string, 0, len(properties))
+		for k, v := range properties {
+			props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
+		}
+
+		// Execute ALTER CATALOG query to update properties
+		query := fmt.Sprintf("ALTER CATALOG %s SET PROPERTIES (%s)",
+			catalogNameInDoris,
+			strings.Join(props, ", "))
+
+		log.Info("Executing alter catalog query")
+		_, err := db.ExecContext(ctx, query)
+		if err != nil {
+			log.Error(err, "Failed to execute ALTER CATALOG query")
+			return err
+		}
+		log.Info("Catalog properties updated successfully")
 	}
 
-	// Build properties string
-	props := make([]string, 0, len(properties))
-	for k, v := range properties {
-		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
-	}
-
-	// Execute ALTER CATALOG query to update properties
-	query := fmt.Sprintf("ALTER CATALOG `%s` SET PROPERTIES (%s)",
-		catalog.Spec.Name,
-		strings.Join(props, ", "))
-
-	log.Info("Executing alter catalog query")
-	_, err := db.ExecContext(ctx, query)
-	if err != nil {
-		log.Error(err, "Failed to execute ALTER CATALOG query")
-		return err
-	}
-
-	// Update comment if provided and different from current
+	// Update comment if provided
 	if catalog.Spec.Comment != "" {
-		commentQuery := fmt.Sprintf("ALTER CATALOG `%s` MODIFY COMMENT '%s'",
-			catalog.Spec.Name,
+		commentQuery := fmt.Sprintf("ALTER CATALOG %s MODIFY COMMENT '%s'",
+			catalogNameInDoris,
 			catalog.Spec.Comment)
 
 		log.Info("Executing alter catalog comment query")
@@ -456,9 +473,33 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 			log.Error(err, "Failed to execute ALTER CATALOG comment query")
 			return err
 		}
+		log.Info("Catalog comment updated successfully")
 	}
 
-	log.Info("Catalog updated successfully")
+	// Check if name needs to be updated (rename operation)
+	if catalogNameInDoris != catalog.Spec.Name {
+		// The internal catalog cannot be renamed
+		if catalogNameInDoris == "internal" {
+			return fmt.Errorf("cannot rename the internal catalog")
+		}
+
+		// Execute ALTER CATALOG RENAME query
+		renameQuery := fmt.Sprintf("ALTER CATALOG %s RENAME %s",
+			catalogNameInDoris,
+			catalog.Spec.Name)
+
+		log.Info("Executing alter catalog rename query",
+			"oldName", catalogNameInDoris,
+			"newName", catalog.Spec.Name)
+
+		_, err := db.ExecContext(ctx, renameQuery)
+		if err != nil {
+			log.Error(err, "Failed to execute ALTER CATALOG RENAME query")
+			return err
+		}
+		log.Info("Catalog renamed successfully")
+	}
+
 	return nil
 }
 
@@ -470,4 +511,20 @@ func (r *CatalogReconciler) ifOwnerReferencesContains(ownerReferences []metav1.O
 		}
 	}
 	return false
+}
+
+// getLastKnownCatalogName returns the last known catalog name that was successfully created/updated
+func (r *CatalogReconciler) getLastKnownCatalogName(catalog *mysqlv1alpha1.Catalog) string {
+	if name, ok := catalog.Annotations[constants.CatalogLastKnownNameAnnotation]; ok && name != "" {
+		return name
+	}
+	return catalog.Spec.Name
+}
+
+// updateLastKnownCatalogName sets the last known catalog name annotation
+func (r *CatalogReconciler) updateLastKnownCatalogName(catalog *mysqlv1alpha1.Catalog) {
+	if catalog.Annotations == nil {
+		catalog.Annotations = make(map[string]string)
+	}
+	catalog.Annotations[constants.CatalogLastKnownNameAnnotation] = catalog.Spec.Name
 }
