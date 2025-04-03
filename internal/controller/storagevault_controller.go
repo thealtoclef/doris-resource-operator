@@ -391,7 +391,12 @@ func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql
 		return false, err
 	}
 
-	log.Info("Storage vault check result", "exists", exists)
+	if exists {
+		log.Info("Storage Vault exists")
+	} else {
+		log.Info("Storage Vault does not exist")
+	}
+
 	return exists, nil
 }
 

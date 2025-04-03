@@ -278,10 +278,10 @@ func (r *WorkloadGroupReconciler) workloadGroupExists(ctx context.Context, db *s
 		return false, err
 	}
 
-	if !exists {
-		log.Info("WorkloadGroup does not exist")
+	if exists {
+		log.Info("Workload group exists")
 	} else {
-		log.Info("WorkloadGroup exists")
+		log.Info("Workload group does not exist")
 	}
 
 	return exists, nil
@@ -309,9 +309,9 @@ func (r *WorkloadGroupReconciler) getWorkloadGroupProperties(ctx context.Context
 	}
 
 	// Create values slice to hold the column values
-	values := make([]interface{}, len(columns))
+	values := make([]any, len(columns))
 	// Create a slice of pointers to the values
-	valuePtrs := make([]interface{}, len(columns))
+	valuePtrs := make([]any, len(columns))
 	for i := range values {
 		valuePtrs[i] = &values[i]
 	}
@@ -351,12 +351,6 @@ func (r *WorkloadGroupReconciler) getWorkloadGroupProperties(ctx context.Context
 	if err := rows.Err(); err != nil {
 		log.Error(err, "Error iterating over workload group properties")
 		return nil, err
-	}
-
-	if len(properties) == 0 {
-		log.Info("No properties found for workload group")
-	} else {
-		log.Info("Fetched workload group properties", "propertyCount", len(properties))
 	}
 
 	return properties, nil
