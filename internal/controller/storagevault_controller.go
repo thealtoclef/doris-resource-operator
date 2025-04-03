@@ -379,7 +379,8 @@ func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql
 	for rows.Next() {
 		var vaultName, id, properties, isDefault string
 		if err := rows.Scan(&vaultName, &id, &properties, &isDefault); err != nil {
-			return false, fmt.Errorf("failed to scan storage vault row: %w", err)
+			log.Error(err, "Failed to scan storage vault row")
+			return false, err
 		}
 		if vaultName == name {
 			exists = true
@@ -414,7 +415,7 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 
 	_, err = db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "Failed to create storage vault")
+		log.Error(err, "Failed to execute CREATE STORAGE VAULT query")
 		return err
 	}
 
@@ -423,8 +424,8 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 		log.Info("Setting storage vault as default")
 		_, err := db.ExecContext(ctx, fmt.Sprintf("SET %s AS DEFAULT STORAGE VAULT", storageVault.Spec.Name))
 		if err != nil {
-			log.Error(err, "Failed to set default storage vault")
-			return fmt.Errorf("failed to set default storage vault: %w", err)
+			log.Error(err, "Failed to execute SET AS DEFAULT STORAGE VAULT query")
+			return err
 		}
 		storageVault.Status.IsDefault = true
 		log.Info("Successfully set storage vault as default")
@@ -444,7 +445,7 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 // updateStorageVault updates an existing storage vault in Doris
 func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault) error {
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
-	log.Info("Updating storage vault")
+	log.Info("Checking if storage vault needs updating")
 
 	// Get the last known vault name that exists in Doris
 	lastKnownName := r.getLastKnownVaultName(storageVault)
@@ -452,7 +453,8 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	// Get current vault properties using the last known name
 	currentProperties, err := r.getStorageVaultProperties(ctx, db, lastKnownName)
 	if err != nil {
-		return fmt.Errorf("failed to get current storage vault properties: %w", err)
+		log.Error(err, "Failed to get current storage vault properties")
+		return err
 	}
 
 	// Check if this vault is currently set as default
@@ -464,86 +466,117 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	// Update the status with the current default information
 	storageVault.Status.IsDefault = isCurrentlyDefault
 
-	// Get properties for SQL update
-	properties, err := r.crToSQL(ctx, storageVault, PropertyModeUpdate, currentProperties)
+	// Get desired properties for SQL update based on the CR
+	desiredProperties, err := r.crToSQL(ctx, storageVault, PropertyModeUpdate, currentProperties)
 	if err != nil {
 		log.Error(err, "Failed to get properties for update")
 		return err
 	}
 
-	// If there are properties to update, execute the update
-	if len(properties) > 1 { // Contains more than just "type"
+	// Compare current and desired properties to determine what needs to change
+	propsToUpdate := make(map[string]string)
+
+	// Add the type property which is required in the SQL statement
+	propsToUpdate["type"] = desiredProperties["type"]
+
+	// Compare and add only changed properties
+	for k, v := range desiredProperties {
+		if k == "type" {
+			continue // Already added above
+		}
+
+		// Check if property value has changed
+		if currentVal, exists := currentProperties[k]; !exists || currentVal != v {
+			propsToUpdate[k] = v
+		}
+	}
+
+	// Special case: VAULT_NAME needs to be included if name is changing
+	if vaultName, exists := desiredProperties["VAULT_NAME"]; exists {
+		propsToUpdate["VAULT_NAME"] = vaultName
+	}
+
+	// If there are properties to update besides just "type", execute the update
+	if len(propsToUpdate) > 1 {
+		log.Info("Updating storage vault properties", "count", len(propsToUpdate)-1)
 		// Build and execute the update query - use the last known name for the ALTER command
-		propsStr := r.propertiesToSQLString(properties)
+		propsStr := r.propertiesToSQLString(propsToUpdate)
 		query := fmt.Sprintf("ALTER STORAGE VAULT %s PROPERTIES (%s)",
 			lastKnownName, propsStr)
 
 		_, err = db.ExecContext(ctx, query)
 		if err != nil {
-			log.Error(err, "Failed to update storage vault")
+			log.Error(err, "Failed to execute ALTER STORAGE VAULT query")
 			return err
 		}
-		log.Info("Storage vault properties updated successfully")
+		log.Info("Storage vault properties updated successfully", "count", len(propsToUpdate)-1)
+	} else {
+		log.Info("Storage vault properties unchanged")
 	}
 
 	// Handle default status change separately from property updates
 	if storageVault.Spec.IsDefault != nil {
-		desiredDefault := *storageVault.Spec.IsDefault
+		wantsToBeDefault := *storageVault.Spec.IsDefault
 
-		// If the vault should be default but isn't currently default, set it as default
-		if desiredDefault && !isCurrentlyDefault {
-			// Set as default
-			log.Info("Setting storage vault as default")
-			_, err := db.ExecContext(ctx, fmt.Sprintf("SET %s AS DEFAULT STORAGE VAULT", storageVault.Spec.Name))
-			if err != nil {
-				log.Error(err, "Failed to set default storage vault")
-				return fmt.Errorf("failed to set default storage vault: %w", err)
-			}
-			storageVault.Status.IsDefault = true
-			log.Info("Successfully set storage vault as default")
-		} else if !desiredDefault && isCurrentlyDefault {
-			// The vault is currently default but should not be
-			// Check if any other vault is marked to be default
-			storageVaultList := &mysqlv1alpha1.StorageVaultList{}
-			if err := r.List(ctx, storageVaultList, &client.ListOptions{Namespace: storageVault.Namespace}); err != nil {
-				log.Error(err, "Failed to list StorageVaults")
-				return fmt.Errorf("failed to list StorageVaults: %w", err)
-			}
-
-			// Look for other vaults in the same cluster marked to be default
-			otherVaultMarkedDefault := false
-			for _, v := range storageVaultList.Items {
-				// Skip the current vault
-				if v.Name == storageVault.Name {
-					continue
-				}
-
-				// Skip vaults from other clusters
-				if v.Spec.ClusterName != storageVault.Spec.ClusterName {
-					continue
-				}
-
-				// Check if another vault is marked as default
-				if v.Spec.IsDefault != nil && *v.Spec.IsDefault {
-					otherVaultMarkedDefault = true
-					break
-				}
-			}
-
-			if !otherVaultMarkedDefault {
-				// No other vault is marked as default, so we need to explicitly unset this one
-				log.Info("No other vault marked as default, explicitly unsetting this vault")
-				_, err := db.ExecContext(ctx, "UNSET DEFAULT STORAGE VAULT")
+		// Only take action if the desired default state is different from current
+		if wantsToBeDefault != isCurrentlyDefault {
+			if wantsToBeDefault {
+				// Set this vault as default
+				log.Info("Setting storage vault as default")
+				_, err := db.ExecContext(ctx, fmt.Sprintf("SET %s AS DEFAULT STORAGE VAULT", lastKnownName))
 				if err != nil {
-					log.Error(err, "Failed to unset default storage vault")
-					return fmt.Errorf("failed to unset default storage vault: %w", err)
+					log.Error(err, "Failed to execute SET AS DEFAULT STORAGE VAULT query")
+					return err
 				}
-			}
 
-			// Update the status regardless of whether we ran the UNSET command
-			// If another vault was marked default, setting that one will unset this one
-			storageVault.Status.IsDefault = false
-			log.Info("Storage vault is no longer default")
+				// Update status after successful change
+				storageVault.Status.IsDefault = true
+				log.Info("Storage vault is now set as default")
+			} else {
+				// Want to unset default status
+				// First check if there's another default vault
+				storageVaultList := &mysqlv1alpha1.StorageVaultList{}
+				if err := r.List(ctx, storageVaultList, &client.ListOptions{Namespace: storageVault.Namespace}); err != nil {
+					log.Error(err, "Failed to list StorageVaults")
+					return err
+				}
+
+				otherVaultMarkedDefault := false
+				for _, v := range storageVaultList.Items {
+					// Skip this vault
+					if v.Name == storageVault.Name {
+						continue
+					}
+
+					// Skip vaults from other clusters
+					if v.Spec.ClusterName != storageVault.Spec.ClusterName {
+						continue
+					}
+
+					// Check if another vault wants to be default
+					if v.Spec.IsDefault != nil && *v.Spec.IsDefault {
+						otherVaultMarkedDefault = true
+						break
+					}
+				}
+
+				if !otherVaultMarkedDefault {
+					// No other vault is marked as default, so we need to explicitly unset this one
+					log.Info("No other vault marked as default, explicitly unsetting this vault")
+					_, err := db.ExecContext(ctx, "UNSET DEFAULT STORAGE VAULT")
+					if err != nil {
+						log.Error(err, "Failed to execute UNSET DEFAULT STORAGE VAULT query")
+						return err
+					}
+				}
+
+				// Update the status regardless of whether we ran the UNSET command
+				// If another vault was marked default, setting that one will unset this one
+				storageVault.Status.IsDefault = false
+				log.Info("Storage vault is no longer default")
+			}
+		} else {
+			log.Info("Storage vault default status unchanged")
 		}
 	}
 
@@ -609,7 +642,7 @@ func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysq
 		}, secret)
 		if err != nil {
 			logger.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
-			return nil, fmt.Errorf("failed to get auth secret: %w", err)
+			return nil, err
 		}
 
 		// Extract access_key
@@ -678,6 +711,7 @@ func (r *StorageVaultReconciler) getStorageVaultProperties(ctx context.Context, 
 	// Execute SHOW STORAGE VAULTS to get all vaults
 	rows, err := db.QueryContext(ctx, "SHOW STORAGE VAULTS")
 	if err != nil {
+		log.Error(err, "Failed to execute SHOW STORAGE VAULTS query")
 		return nil, err
 	}
 	defer rows.Close()
@@ -686,7 +720,8 @@ func (r *StorageVaultReconciler) getStorageVaultProperties(ctx context.Context, 
 	for rows.Next() {
 		var vaultName, id, propertiesStr, isDefault string
 		if err := rows.Scan(&vaultName, &id, &propertiesStr, &isDefault); err != nil {
-			return nil, fmt.Errorf("failed to scan storage vault row: %w", err)
+			log.Error(err, "Failed to scan storage vault row")
+			return nil, err
 		}
 
 		if vaultName == name {

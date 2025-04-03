@@ -35,6 +35,8 @@ import (
 	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"maps"
+
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
 	"github.com/nakamasato/mysql-operator/internal/constants"
 	metrics "github.com/nakamasato/mysql-operator/internal/metrics"
@@ -197,7 +199,6 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			return ctrl.Result{}, err // requeue
 		}
-		log.Info("Created catalog successfully")
 
 		catalog.Status.CatalogCreated = true
 		metrics.CatalogCreatedTotal.Increment()
@@ -228,7 +229,6 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			return ctrl.Result{}, err // requeue
 		}
-		log.Info("Updated catalog successfully")
 	}
 
 	// Update status
@@ -284,8 +284,8 @@ func (r *CatalogReconciler) finalizeCatalog(ctx context.Context, db *sql.DB, cat
 	query := fmt.Sprintf("DROP CATALOG IF EXISTS %s", catalogNameInDoris)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "Failed to drop catalog")
-		return fmt.Errorf("failed to drop catalog: %w", err)
+		log.Error(err, "Failed to execute DROP CATALOG query")
+		return err
 	}
 
 	log.Info("Catalog dropped successfully")
@@ -350,9 +350,7 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 
 	// Initialize properties map with values from the Properties field
 	properties := make(map[string]string)
-	for k, v := range catalog.Spec.Properties {
-		properties[k] = v
-	}
+	maps.Copy(properties, catalog.Spec.Properties)
 
 	// If PropertiesSecret is provided, get properties from the secret
 	if catalog.Spec.PropertiesSecret != "" {
@@ -362,15 +360,13 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 			Name:      catalog.Spec.PropertiesSecret,
 		}, propertiesSecret)
 		if err != nil {
-			log.Error(err, "Failed to get properties secret",
-				"secretName", catalog.Spec.PropertiesSecret)
-			return fmt.Errorf("failed to get properties secret: %w", err)
+			log.Error(err, "Failed to get properties secret", "secretName", catalog.Spec.PropertiesSecret)
+			return err
 		}
 
 		// Add all properties from the secret
 		for k, v := range propertiesSecret.Data {
 			properties[k] = string(v)
-			log.Info("Property retrieved from secret", "key", k)
 		}
 	}
 
@@ -393,7 +389,6 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 			strings.Join(props, ", "))
 	}
 
-	log.Info("Executing create catalog query")
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute CREATE CATALOG query")
@@ -407,13 +402,25 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 // updateCatalog updates an existing catalog in Doris
 func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog, catalogNameInDoris string) error {
 	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", catalog.Spec.Name)
-	log.Info("Updating catalog")
+	log.Info("Checking if catalog needs updating")
 
-	// Initialize properties map with values from the Properties field
-	properties := make(map[string]string)
+	// Get current catalog properties from SHOW CREATE CATALOG statement
+	currentCreateStmt, err := r.getCatalogProperties(ctx, db, catalogNameInDoris)
+	if err != nil {
+		log.Error(err, "Failed to get current catalog properties")
+		return err
+	}
+
+	// Extract all information from the CREATE CATALOG statement
+	currentProps := r.parsePropertiesFromCreateStmt(currentCreateStmt)
+	currentComment := r.parseCommentFromCreateStmt(currentCreateStmt)
+	log.Info("Current catalog state", "properties", currentProps, "comment", currentComment)
+
+	// Initialize desired properties map with values from the Properties field
+	desiredProps := make(map[string]string)
 	for k, v := range catalog.Spec.Properties {
 		if k != "type" { // type cannot be modified
-			properties[k] = v
+			desiredProps[k] = v
 		}
 	}
 
@@ -425,25 +432,33 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 			Name:      catalog.Spec.PropertiesSecret,
 		}, propertiesSecret)
 		if err != nil {
-			log.Error(err, "Failed to get properties secret",
-				"secretName", catalog.Spec.PropertiesSecret)
-			return fmt.Errorf("failed to get properties secret: %w", err)
+			log.Error(err, "Failed to get properties secret", "secretName", catalog.Spec.PropertiesSecret)
+			return err
 		}
 
 		// Add all properties from the secret
 		for k, v := range propertiesSecret.Data {
 			if k != "type" { // type cannot be modified
-				properties[k] = string(v)
-				log.Info("Property retrieved from secret", "key", k)
+				desiredProps[k] = string(v)
 			}
 		}
 	}
 
+	// Compare properties to determine what needs to be updated
+	propsToUpdate := make(map[string]string)
+	for k, v := range desiredProps {
+		if currentVal, exists := currentProps[k]; !exists || currentVal != v {
+			propsToUpdate[k] = v
+		}
+	}
+
 	// Update properties if there are any to update
-	if len(properties) > 0 {
+	if len(propsToUpdate) > 0 {
+		log.Info("Updating catalog properties", "count", len(propsToUpdate))
+
 		// Build properties string
-		props := make([]string, 0, len(properties))
-		for k, v := range properties {
+		props := make([]string, 0, len(propsToUpdate))
+		for k, v := range propsToUpdate {
 			props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
 		}
 
@@ -452,55 +467,106 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 			catalogNameInDoris,
 			strings.Join(props, ", "))
 
-		log.Info("Executing alter catalog query")
+		log.Info("Executing alter catalog query", "updatedProperties", len(propsToUpdate))
 		_, err := db.ExecContext(ctx, query)
 		if err != nil {
 			log.Error(err, "Failed to execute ALTER CATALOG query")
 			return err
 		}
-		log.Info("Catalog properties updated successfully")
+		log.Info("Catalog properties updated successfully", "count", len(propsToUpdate))
+	} else {
+		log.Info("Catalog properties unchanged")
 	}
 
-	// Update comment if provided
-	if catalog.Spec.Comment != "" {
-		commentQuery := fmt.Sprintf("ALTER CATALOG %s MODIFY COMMENT '%s'",
-			catalogNameInDoris,
-			catalog.Spec.Comment)
-
-		log.Info("Executing alter catalog comment query")
+	// Check if comment needs updating by comparing with current comment
+	commentNeedsUpdate := catalog.Spec.Comment != "" && catalog.Spec.Comment != currentComment
+	if commentNeedsUpdate {
+		log.Info("Updating catalog comment")
+		// Update comment
+		commentQuery := fmt.Sprintf("ALTER CATALOG %s SET COMMENT = '%s'",
+			catalogNameInDoris, catalog.Spec.Comment)
 		_, err := db.ExecContext(ctx, commentQuery)
 		if err != nil {
-			log.Error(err, "Failed to execute ALTER CATALOG comment query")
+			log.Error(err, "Failed to update catalog comment")
 			return err
 		}
 		log.Info("Catalog comment updated successfully")
+	} else if catalog.Spec.Comment != "" {
+		log.Info("Catalog comment unchanged")
 	}
 
-	// Check if name needs to be updated (rename operation)
+	// Handle name change if needed
 	if catalogNameInDoris != catalog.Spec.Name {
-		// The internal catalog cannot be renamed
-		if catalogNameInDoris == "internal" {
-			return fmt.Errorf("cannot rename the internal catalog")
-		}
-
-		// Execute ALTER CATALOG RENAME query
+		log.Info("Updating catalog name")
+		// Execute ALTER CATALOG RENAME statement
 		renameQuery := fmt.Sprintf("ALTER CATALOG %s RENAME %s",
-			catalogNameInDoris,
-			catalog.Spec.Name)
-
-		log.Info("Executing alter catalog rename query",
-			"oldName", catalogNameInDoris,
-			"newName", catalog.Spec.Name)
-
+			catalogNameInDoris, catalog.Spec.Name)
 		_, err := db.ExecContext(ctx, renameQuery)
 		if err != nil {
-			log.Error(err, "Failed to execute ALTER CATALOG RENAME query")
+			log.Error(err, "Failed to rename catalog")
 			return err
 		}
 		log.Info("Catalog renamed successfully")
+	} else {
+		log.Info("Catalog name unchanged")
 	}
 
 	return nil
+}
+
+// parsePropertiesFromCreateStmt extracts properties from CREATE CATALOG statement
+func (r *CatalogReconciler) parsePropertiesFromCreateStmt(createStmt string) map[string]string {
+	properties := make(map[string]string)
+
+	// Extract properties section between PROPERTIES( and )
+	propertiesIdx := strings.Index(createStmt, "PROPERTIES (")
+	if propertiesIdx == -1 {
+		return properties
+	}
+
+	propStart := propertiesIdx + len("PROPERTIES (")
+	propEnd := strings.LastIndex(createStmt, ")")
+	if propEnd <= propStart {
+		return properties
+	}
+
+	propSection := createStmt[propStart:propEnd]
+
+	// Parse key-value pairs
+	// This is a simple parser that assumes properties are in the format 'key'='value'
+	propPairs := strings.Split(propSection, ",")
+	for _, pair := range propPairs {
+		pair = strings.TrimSpace(pair)
+		keyValueMatch := strings.Split(pair, "=")
+		if len(keyValueMatch) == 2 {
+			// Extract key and value removing quotes
+			key := strings.Trim(strings.TrimSpace(keyValueMatch[0]), "'")
+			value := strings.Trim(strings.TrimSpace(keyValueMatch[1]), "'")
+			properties[key] = value
+		}
+	}
+
+	return properties
+}
+
+// parseCommentFromCreateStmt extracts the comment from the CREATE CATALOG statement
+func (r *CatalogReconciler) parseCommentFromCreateStmt(createStmt string) string {
+	// Extract comment section between COMMENT ' and '
+	commentIdx := strings.Index(createStmt, "COMMENT '")
+	if commentIdx == -1 {
+		return ""
+	}
+
+	commentStart := commentIdx + len("COMMENT '")
+	restOfStmt := createStmt[commentStart:]
+
+	// Find the closing quote
+	endQuoteIdx := strings.Index(restOfStmt, "'")
+	if endQuoteIdx == -1 {
+		return ""
+	}
+
+	return restOfStmt[:endQuoteIdx]
 }
 
 // ifOwnerReferencesContains checks if the ownerReferences contains the MySQL object

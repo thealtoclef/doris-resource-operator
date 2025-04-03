@@ -248,8 +248,8 @@ func (r *WorkloadGroupReconciler) finalizeWorkloadGroup(ctx context.Context, db 
 	query := fmt.Sprintf("DROP WORKLOAD GROUP IF EXISTS %s", workloadGroup.Spec.Name)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "Failed to drop workload group")
-		return fmt.Errorf("failed to drop workload group: %w", err)
+		log.Error(err, "Failed to execute DROP WORKLOAD GROUP query")
+		return err
 	}
 
 	log.Info("WorkloadGroup dropped successfully")
@@ -376,21 +376,6 @@ func (r *WorkloadGroupReconciler) createWorkloadGroup(ctx context.Context, db *s
 	properties := make(map[string]string)
 	maps.Copy(properties, workloadGroup.Spec.Properties)
 
-	// Ensure required properties are present
-	requiredProps := []string{"cpu_share", "memory_limit"}
-	missingProps := []string{}
-	for _, prop := range requiredProps {
-		if _, exists := properties[prop]; !exists {
-			missingProps = append(missingProps, prop)
-		}
-	}
-
-	if len(missingProps) > 0 {
-		errorMsg := fmt.Sprintf("required properties missing: %s", strings.Join(missingProps, ", "))
-		log.Error(fmt.Errorf("%s", errorMsg), "Missing required properties")
-		return fmt.Errorf("%s", errorMsg)
-	}
-
 	// Build properties string
 	props := make([]string, 0, len(properties))
 	for k, v := range properties {
@@ -402,7 +387,6 @@ func (r *WorkloadGroupReconciler) createWorkloadGroup(ctx context.Context, db *s
 		workloadGroup.Spec.Name,
 		strings.Join(props, ", "))
 
-	log.Info("Executing create workload group query", "properties", properties)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute CREATE WORKLOAD GROUP query")
@@ -416,7 +400,7 @@ func (r *WorkloadGroupReconciler) createWorkloadGroup(ctx context.Context, db *s
 // updateWorkloadGroup updates an existing workload group in Doris
 func (r *WorkloadGroupReconciler) updateWorkloadGroup(ctx context.Context, db *sql.DB, workloadGroup *mysqlv1alpha1.WorkloadGroup) error {
 	log := log.FromContext(ctx).WithName("WorkloadGroupReconciler").WithValues("workloadGroup", workloadGroup.Spec.Name)
-	log.Info("Updating workload group")
+	log.Info("Checking if workload group needs updating")
 
 	// Get current properties of the workload group
 	currentProps, err := r.getWorkloadGroupProperties(ctx, db, workloadGroup.Spec.Name)
@@ -438,31 +422,30 @@ func (r *WorkloadGroupReconciler) updateWorkloadGroup(ctx context.Context, db *s
 		}
 	}
 
-	// Skip update if no properties to update
-	if len(propsToUpdate) == 0 {
-		log.Info("No properties to update")
-		return nil
+	// Update properties if there are any to update
+	if len(propsToUpdate) > 0 {
+		log.Info("Updating workload group properties", "count", len(propsToUpdate))
+		// Build properties string for the properties that need updating
+		props := make([]string, 0, len(propsToUpdate))
+		for k, v := range propsToUpdate {
+			props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
+		}
+
+		// Execute ALTER WORKLOAD GROUP query to update properties
+		query := fmt.Sprintf("ALTER WORKLOAD GROUP %s PROPERTIES (%s)",
+			workloadGroup.Spec.Name,
+			strings.Join(props, ", "))
+
+		_, err = db.ExecContext(ctx, query)
+		if err != nil {
+			log.Error(err, "Failed to execute ALTER WORKLOAD GROUP query")
+			return err
+		}
+		log.Info("WorkloadGroup properties updated successfully", "count", len(propsToUpdate))
+	} else {
+		log.Info("WorkloadGroup properties unchanged")
 	}
 
-	// Build properties string for the properties that need updating
-	props := make([]string, 0, len(propsToUpdate))
-	for k, v := range propsToUpdate {
-		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
-	}
-
-	// Execute ALTER WORKLOAD GROUP query to update properties
-	query := fmt.Sprintf("ALTER WORKLOAD GROUP %s PROPERTIES (%s)",
-		workloadGroup.Spec.Name,
-		strings.Join(props, ", "))
-
-	log.Info("Executing alter workload group query", "updatedProperties", len(propsToUpdate))
-	_, err = db.ExecContext(ctx, query)
-	if err != nil {
-		log.Error(err, "Failed to execute ALTER WORKLOAD GROUP query")
-		return err
-	}
-
-	log.Info("WorkloadGroup updated successfully")
 	return nil
 }
 
