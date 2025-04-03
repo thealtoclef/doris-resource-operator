@@ -33,6 +33,7 @@ rules:
   - mysqlusers
   - storagevaults
   - catalogs
+  - workloadgroups
   verbs:
   - create
   - delete
@@ -49,6 +50,7 @@ rules:
   - mysqlusers/finalizers
   - storagevaults/finalizers
   - catalogs/finalizers
+  - workloadgroups/finalizers
   verbs:
   - update
 - apiGroups:
@@ -59,6 +61,7 @@ rules:
   - mysqlusers/status
   - storagevaults/status
   - catalogs/status
+  - workloadgroups/status
   verbs:
   - get
   - patch

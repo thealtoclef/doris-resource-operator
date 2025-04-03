@@ -5,6 +5,35 @@
 host: ~
 port: 9030
 authSecret: ~
+storageVaults: []
+  # - name: aws_s3_vault
+  #   type: S3
+  #   s3Properties:
+  #     endpoint: s3.us-east-1.amazonaws.com
+  #     region: us-east-1
+  #     authSecret: aws-s3-vault-secret
+  #     rootPath: s3_vault_prefix
+  #     bucket: my-bucket
+  #     provider: S3
+  #     usePathStyle: false
+  #   isDefault: true
+workloadGroups: []
+  # - name: g1
+  #   properties:
+  #     cpu_share: "10"
+  #     memory_limit: "30%"
+  #     enable_memory_overcommit: "true"
+catalogs: []
+  # - name: postgres_catalog
+  #   comment: PostgreSQL Catalog
+  #   properties:
+  #     type: jdbc
+  #     user: postgres
+  #     password: 123456
+  #     jdbc_url: jdbc:postgresql://127.0.0.1:5432/demo
+  #     driver_url: file:///path/to/postgresql-42.5.1.jar
+  #     driver_class: org.postgresql.Driver
+  #   propertiesSecret: postgres-catalog-secret
 users: []
   # - username: test_user
   #   passwordSecretRef:
@@ -25,26 +54,3 @@ users: []
   #     - privileges:
   #         - USAGE
   #       target: RESOURCE 'test_resource'
-storageVaults: []
-  # - name: aws_s3_vault
-  #   type: S3
-  #   s3Properties:
-  #     endpoint: s3.us-east-1.amazonaws.com
-  #     region: us-east-1
-  #     authSecret: aws-s3-vault-secret
-  #     rootPath: s3_vault_prefix
-  #     bucket: my-bucket
-  #     provider: S3
-  #     usePathStyle: false
-  #   isDefault: true
-catalogs: []
-  # - name: postgres_catalog
-  #   comment: PostgreSQL Catalog
-  #   properties:
-  #     type: jdbc
-  #     user: postgres
-  #     password: 123456
-  #     jdbc_url: jdbc:postgresql://127.0.0.1:5432/demo
-  #     driver_url: file:///path/to/postgresql-42.5.1.jar
-  #     driver_class: org.postgresql.Driver
-  #   propertiesSecret: postgres-catalog-secret

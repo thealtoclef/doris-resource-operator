@@ -1,0 +1,19 @@
+{{- range .Values.workloadGroups }}
+---
+apiVersion: mysql.nakamasato.com/v1alpha1
+kind: WorkloadGroup
+metadata:
+  name: {{ template "doris-resource-manager.fullname" $ }}-{{ .name | replace "_" "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "doris-resource-manager.labels" $ | nindent 4 }}
+spec:
+  clusterName: {{ template "doris-resource-manager.fullname" $ }}
+  name: {{ .name }}
+  {{- with .properties }}
+  properties:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .propertiesSecret }}
+  propertiesSecret: {{ . }}
+  {{- end }}
+{{- end }}
