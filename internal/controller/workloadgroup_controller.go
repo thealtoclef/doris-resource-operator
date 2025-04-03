@@ -53,15 +53,6 @@ type WorkloadGroupReconciler struct {
 	MySQLClients mysqlinternal.MySQLClients
 }
 
-// NewWorkloadGroupReconciler creates a new WorkloadGroupReconciler
-func NewWorkloadGroupReconciler(client client.Client, scheme *runtime.Scheme, mysqlClients mysqlinternal.MySQLClients) *WorkloadGroupReconciler {
-	return &WorkloadGroupReconciler{
-		Client:       client,
-		Scheme:       scheme,
-		MySQLClients: mysqlClients,
-	}
-}
-
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=workloadgroups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=workloadgroups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=workloadgroups/finalizers,verbs=update

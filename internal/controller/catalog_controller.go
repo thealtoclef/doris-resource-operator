@@ -55,15 +55,6 @@ type CatalogReconciler struct {
 	MySQLClients mysqlinternal.MySQLClients
 }
 
-// NewCatalogReconciler creates a new CatalogReconciler
-func NewCatalogReconciler(client client.Client, scheme *runtime.Scheme, mysqlClients mysqlinternal.MySQLClients) *CatalogReconciler {
-	return &CatalogReconciler{
-		Client:       client,
-		Scheme:       scheme,
-		MySQLClients: mysqlClients,
-	}
-}
-
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=catalogs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=catalogs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=catalogs/finalizers,verbs=update
