@@ -386,7 +386,6 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 	// Extract all information from the CREATE CATALOG statement
 	currentProps := r.parsePropertiesFromCreateStmt(currentCreateStmt)
 	currentComment := r.parseCommentFromCreateStmt(currentCreateStmt)
-	log.Info("Current catalog state", "properties", currentProps, "comment", currentComment)
 
 	// Initialize desired properties map with values from the Properties field
 	desiredProps := make(map[string]string)
@@ -439,7 +438,6 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 			catalogNameInDoris,
 			strings.Join(props, ", "))
 
-		log.Info("Executing alter catalog query", "updatedProperties", len(propsToUpdate))
 		_, err := db.ExecContext(ctx, query)
 		if err != nil {
 			log.Error(err, "Failed to execute ALTER CATALOG SET PROPERTIES query")
