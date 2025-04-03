@@ -306,19 +306,51 @@ func (r *WorkloadGroupReconciler) getWorkloadGroupProperties(ctx context.Context
 	}
 	defer rows.Close()
 
-	// The response has a format where each property is a separate row
-	// |Id|Name|Item|Value|
-	// We need to collect all properties into a map
+	// Get column names from the result set
+	columns, err := rows.Columns()
+	if err != nil {
+		log.Error(err, "Error getting column names from result")
+		return nil, err
+	}
+
+	// Create values slice to hold the column values
+	values := make([]interface{}, len(columns))
+	// Create a slice of pointers to the values
+	valuePtrs := make([]interface{}, len(columns))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
 	properties := make(map[string]string)
-	for rows.Next() {
-		var id, groupName, item, value string
-		if err := rows.Scan(&id, &groupName, &item, &value); err != nil {
+
+	// Process rows
+	if rows.Next() {
+		// Scan the row into the slice of pointers
+		if err := rows.Scan(valuePtrs...); err != nil {
 			log.Error(err, "Error scanning row from SHOW WORKLOAD GROUPS result")
 			return nil, err
 		}
 
-		// Store each property in the map
-		properties[item] = value
+		// Convert the values to strings and populate the properties map
+		// Skip 'Id' and 'Name' columns as they're not properties
+		for i, col := range columns {
+			if col != "Id" && col != "Name" {
+				// Convert the value to string based on its type
+				var strVal string
+				if values[i] == nil {
+					strVal = ""
+				} else {
+					// Handle different types of values
+					switch v := values[i].(type) {
+					case []byte:
+						strVal = string(v)
+					default:
+						strVal = fmt.Sprintf("%v", v)
+					}
+				}
+				properties[col] = strVal
+			}
+		}
 	}
 
 	if err := rows.Err(); err != nil {
