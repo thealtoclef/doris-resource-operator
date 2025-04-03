@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -588,7 +589,7 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 
 // crToSQL converts CR properties to SQL format using the field mapping
 func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysqlv1alpha1.StorageVault, mode VaultPropertyMode, currentProperties map[string]string) (map[string]string, error) {
-	logger := log.FromContext(ctx)
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	properties := make(map[string]string)
 	properties["type"] = string(storageVault.Spec.Type)
 
@@ -641,7 +642,7 @@ func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysq
 			Name:      s3Props.AuthSecret,
 		}, secret)
 		if err != nil {
-			logger.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
+			log.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
 			return nil, err
 		}
 
@@ -665,11 +666,11 @@ func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysq
 			// For update, check if access key has changed
 			currentAccessKey, hasCurrentAccessKey := currentProperties["s3.access_key"]
 			if !hasCurrentAccessKey || currentAccessKey != string(accessKey) {
-				logger.Info("Access key has changed, updating both access key and secret key")
+				log.Info("Access key has changed, updating both access key and secret key")
 				addField("accessKey", string(accessKey))
 				addField("secretKey", string(secretKey))
 			} else {
-				logger.Info("Access key unchanged, assuming secret key also unchanged")
+				log.Info("Access key unchanged, assuming secret key also unchanged")
 			}
 		}
 
@@ -681,12 +682,12 @@ func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysq
 			// Get the actual current name from the database properties
 			currentVaultName, ok := currentProperties["name"]
 			if !ok {
-				logger.Info("Could not find current vault name in properties, skipping name check")
+				log.Info("Could not find current vault name in properties, skipping name check")
 				// This should never happen since we set the name in parseStorageVaultRow
 			} else {
 				// Only add VAULT_NAME to the properties if the current vault name is different from the desired name
 				if currentVaultName != desiredVaultName {
-					logger.Info("Vault name needs to change", "from", currentVaultName, "to", desiredVaultName)
+					log.Info("Vault name needs to change", "from", currentVaultName, "to", desiredVaultName)
 					properties["VAULT_NAME"] = desiredVaultName
 				}
 			}
@@ -785,67 +786,23 @@ func (r *StorageVaultReconciler) parseStorageVaultRow(ctx context.Context, vault
 func (r *StorageVaultReconciler) parsePropertiesString(propertiesStr string) map[string]string {
 	properties := make(map[string]string)
 
-	// Parse the properties string
-	insideQuote := false
-	currentKey := ""
-	currentValue := ""
-	collectingValue := false
+	// Regex for key-value pairs
+	keyValueRegex := regexp.MustCompile(`(\w+):\s*("[^"]*"|[^\s]+)`)
 
-	// Split the properties string into key-value pairs
-	for i := 0; i < len(propertiesStr); i++ {
-		char := propertiesStr[i]
+	// Find all key-value pairs
+	matches := keyValueRegex.FindAllStringSubmatch(propertiesStr, -1)
+	for _, match := range matches {
+		if len(match) == 3 {
+			key := strings.TrimSpace(match[1])
+			value := strings.TrimSpace(match[2])
 
-		// Handle quotes
-		if char == '"' {
-			insideQuote = !insideQuote
-			if collectingValue {
-				currentValue += string(char)
-			}
-			continue
-		}
-
-		// If inside quotes, add character to current value
-		if insideQuote {
-			if collectingValue {
-				currentValue += string(char)
-			}
-			continue
-		}
-
-		// Handle key-value separator
-		if char == ':' && !collectingValue {
-			collectingValue = true
-			currentKey = strings.TrimSpace(currentKey)
-			continue
-		}
-
-		// Handle end of value (space outside quotes)
-		if char == ' ' && collectingValue {
-			// Store the key-value pair if we have both
-			if currentKey != "" && currentValue != "" {
-				// Trim quotes from value
-				currentValue = strings.Trim(currentValue, "\"")
-				properties[currentKey] = currentValue
+			// Remove quotes if present
+			if strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"") {
+				value = value[1 : len(value)-1]
 			}
 
-			// Reset for next pair
-			currentKey = ""
-			currentValue = ""
-			collectingValue = false
-			continue
-		}
-
-		// Add character to current key or value
-		if collectingValue {
-			currentValue += string(char)
-		} else {
-			currentKey += string(char)
-		}
-
-		// If at the end of the string and still collecting, store the last pair
-		if i == len(propertiesStr)-1 && currentKey != "" && currentValue != "" {
-			currentValue = strings.Trim(currentValue, "\"")
-			properties[currentKey] = currentValue
+			// Store all values as strings
+			properties[key] = value
 		}
 	}
 
