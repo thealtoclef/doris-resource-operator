@@ -60,8 +60,9 @@ spec:
                   rule: self == oldSelf
               isDefault:
                 default: false
-                description: IsDefault indicates whether this vault should be set
-                  as the default storage vault
+                description: |-
+                  IsDefault indicates whether this vault should be set as the default storage vault
+                  Only one storage vault can be the default in a Doris cluster at any time.
                 type: boolean
               name:
                 description: |-

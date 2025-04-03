@@ -110,6 +110,7 @@ type StorageVaultSpec struct {
 	S3Properties *S3Properties `json:"s3Properties,omitempty"`
 
 	// IsDefault indicates whether this vault should be set as the default storage vault
+	// Only one storage vault can be the default in a Doris cluster at any time.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=false
 	IsDefault *bool `json:"isDefault,omitempty"`
