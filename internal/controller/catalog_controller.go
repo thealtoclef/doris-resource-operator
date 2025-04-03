@@ -176,7 +176,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Check if catalog exists - use the last known name to check
 	exists, err := r.catalogExists(ctx, mysqlClient, catalogNameInDoris)
 	if err != nil {
-		log.Error(err, "[Catalog] Failed to check if catalog exists", "clusterName", clusterName, "catalogName", catalogNameInDoris)
+		log.Error(err, "Failed to check if catalog exists", "clusterName", clusterName, "catalogName", catalogNameInDoris)
 		catalog.Status.Phase = constants.PhaseNotReady
 		catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
 		if serr := r.Status().Update(ctx, catalog); serr != nil {
@@ -187,7 +187,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if !exists {
-		// Create catalog if not exists
+		// Create catalog
 		err := r.createCatalog(ctx, mysqlClient, catalog)
 		if err != nil {
 			log.Error(err, "Failed to create catalog")
@@ -217,8 +217,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		catalog.Status.CatalogCreated = true
-
-		// Update catalog if exists - using the last known name
+		// Update catalog
 		if err := r.updateCatalog(ctx, mysqlClient, catalog, catalogNameInDoris); err != nil {
 			log.Error(err, "Failed to update catalog")
 			catalog.Status.Phase = constants.PhaseNotReady

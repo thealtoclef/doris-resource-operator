@@ -170,7 +170,7 @@ func (r *WorkloadGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// Check if workload group exists
 	exists, err := r.workloadGroupExists(ctx, mysqlClient, workloadGroup.Spec.Name)
 	if err != nil {
-		log.Error(err, "[WorkloadGroup] Failed to check if workload group exists", "clusterName", clusterName, "workloadGroupName", workloadGroup.Spec.Name)
+		log.Error(err, "Failed to check if workload group exists", "clusterName", clusterName, "workloadGroupName", workloadGroup.Spec.Name)
 		workloadGroup.Status.Phase = constants.PhaseNotReady
 		workloadGroup.Status.Reason = constants.ReasonFailedToCreateWorkloadGroup
 		if serr := r.Status().Update(ctx, workloadGroup); serr != nil {
@@ -181,8 +181,7 @@ func (r *WorkloadGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	if !exists {
-		// Create workload group if not exists
-		log.Info("[WorkloadGroup] Creating new workload group", "name", workloadGroup.Spec.Name)
+		// Create workload group
 		err := r.createWorkloadGroup(ctx, mysqlClient, workloadGroup)
 		if err != nil {
 			log.Error(err, "Failed to create workload group", "name", workloadGroup.Spec.Name)
@@ -194,13 +193,12 @@ func (r *WorkloadGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			}
 			return ctrl.Result{}, err // requeue
 		}
-		log.Info("Created workload group successfully", "name", workloadGroup.Spec.Name)
 
 		workloadGroup.Status.WorkloadGroupCreated = true
 		metrics.WorkloadGroupCreatedTotal.Increment()
 	} else {
-		// Workload group exists, update if needed
-		log.Info("[WorkloadGroup] Updating existing workload group", "name", workloadGroup.Spec.Name)
+		workloadGroup.Status.WorkloadGroupCreated = true
+		// Update workload group
 		if err := r.updateWorkloadGroup(ctx, mysqlClient, workloadGroup); err != nil {
 			log.Error(err, "Failed to update workload group", "name", workloadGroup.Spec.Name)
 			workloadGroup.Status.Phase = constants.PhaseNotReady
@@ -211,9 +209,6 @@ func (r *WorkloadGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			}
 			return ctrl.Result{}, err // requeue
 		}
-		log.Info("Updated workload group successfully", "name", workloadGroup.Spec.Name)
-
-		workloadGroup.Status.WorkloadGroupCreated = true
 	}
 
 	// Update status

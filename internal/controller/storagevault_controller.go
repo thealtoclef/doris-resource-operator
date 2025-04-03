@@ -277,7 +277,7 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Check if storage vault exists - use the last known name to check
 	exists, err := r.storageVaultExists(ctx, mysqlClient, vaultNameInDoris)
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to check if storage vault exists", "clusterName", clusterName, "storageVaultName", vaultNameInDoris)
+		log.Error(err, "Failed to check if storage vault exists", "clusterName", clusterName, "storageVaultName", vaultNameInDoris)
 		storageVault.Status.Phase = constants.PhaseNotReady
 		storageVault.Status.Reason = constants.ReasonFailedToCreateVault
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
@@ -288,7 +288,7 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if !exists {
-		// Create storage vault if not exists
+		// Create storage vault
 		if err := r.createStorageVault(ctx, mysqlClient, storageVault); err != nil {
 			log.Error(err, "Failed to create storage vault")
 			storageVault.Status.Phase = constants.PhaseNotReady
@@ -299,12 +299,11 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 			return ctrl.Result{}, err // requeue
 		}
-		log.Info("Created storage vault successfully")
 		storageVault.Status.VaultCreated = true
 		metrics.StorageVaultCreatedTotal.Increment()
 	} else {
 		storageVault.Status.VaultCreated = true
-		// Update storage vault if exists
+		// Update storage vault
 		if err := r.updateStorageVault(ctx, mysqlClient, storageVault); err != nil {
 			log.Error(err, "Failed to update storage vault")
 			storageVault.Status.Phase = constants.PhaseNotReady
@@ -315,7 +314,6 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 			return ctrl.Result{}, err // requeue
 		}
-		log.Info("Updated storage vault successfully")
 	}
 
 	// Update status
