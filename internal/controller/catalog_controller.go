@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"maps"
+	"regexp"
 	"strings"
 	"time"
 
@@ -441,7 +442,7 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 		log.Info("Executing alter catalog query", "updatedProperties", len(propsToUpdate))
 		_, err := db.ExecContext(ctx, query)
 		if err != nil {
-			log.Error(err, "Failed to execute ALTER CATALOG query")
+			log.Error(err, "Failed to execute ALTER CATALOG SET PROPERTIES query")
 			return err
 		}
 		log.Info("Catalog properties updated successfully", "count", len(propsToUpdate))
@@ -454,11 +455,11 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 	if commentNeedsUpdate {
 		log.Info("Updating catalog comment")
 		// Update comment
-		commentQuery := fmt.Sprintf("ALTER CATALOG %s SET COMMENT = '%s'",
+		commentQuery := fmt.Sprintf("ALTER CATALOG %s MODIFY COMMENT = '%s'",
 			catalogNameInDoris, catalog.Spec.Comment)
 		_, err := db.ExecContext(ctx, commentQuery)
 		if err != nil {
-			log.Error(err, "Failed to update catalog comment")
+			log.Error(err, "Failed to execute ALTER CATALOG MODIFY COMMENT query")
 			return err
 		}
 		log.Info("Catalog comment updated successfully")
@@ -474,7 +475,7 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 			catalogNameInDoris, catalog.Spec.Name)
 		_, err := db.ExecContext(ctx, renameQuery)
 		if err != nil {
-			log.Error(err, "Failed to rename catalog")
+			log.Error(err, "Failed to execute ALTER CATALOG RENAME query")
 			return err
 		}
 		log.Info("Catalog renamed successfully")
@@ -503,16 +504,15 @@ func (r *CatalogReconciler) parsePropertiesFromCreateStmt(createStmt string) map
 
 	propSection := createStmt[propStart:propEnd]
 
-	// Parse key-value pairs
-	// This is a simple parser that assumes properties are in the format 'key'='value'
-	propPairs := strings.Split(propSection, ",")
-	for _, pair := range propPairs {
-		pair = strings.TrimSpace(pair)
-		keyValueMatch := strings.Split(pair, "=")
-		if len(keyValueMatch) == 2 {
-			// Extract key and value removing quotes
-			key := strings.Trim(strings.TrimSpace(keyValueMatch[0]), "'")
-			value := strings.Trim(strings.TrimSpace(keyValueMatch[1]), "'")
+	// Use regex to match key-value pairs: "key" = "value" or 'key' = 'value'
+	// This handles both double and single quotes for both keys and values
+	keyValueRegex := regexp.MustCompile(`["']([^"']+)["']\s*=\s*["']([^"']*)["']`)
+	matches := keyValueRegex.FindAllStringSubmatch(propSection, -1)
+
+	for _, match := range matches {
+		if len(match) == 3 {
+			key := match[1]
+			value := match[2]
 			properties[key] = value
 		}
 	}
@@ -522,22 +522,16 @@ func (r *CatalogReconciler) parsePropertiesFromCreateStmt(createStmt string) map
 
 // parseCommentFromCreateStmt extracts the comment from the CREATE CATALOG statement
 func (r *CatalogReconciler) parseCommentFromCreateStmt(createStmt string) string {
-	// Extract comment section between COMMENT ' and '
-	commentIdx := strings.Index(createStmt, "COMMENT '")
-	if commentIdx == -1 {
-		return ""
+	// Use regex to extract the comment part from CREATE CATALOG statement
+	// This handles both single and double quoted comments
+	commentRegex := regexp.MustCompile(`COMMENT\s+["']([^"']*)["']`)
+	match := commentRegex.FindStringSubmatch(createStmt)
+
+	if len(match) == 2 {
+		return match[1]
 	}
 
-	commentStart := commentIdx + len("COMMENT '")
-	restOfStmt := createStmt[commentStart:]
-
-	// Find the closing quote
-	endQuoteIdx := strings.Index(restOfStmt, "'")
-	if endQuoteIdx == -1 {
-		return ""
-	}
-
-	return restOfStmt[:endQuoteIdx]
+	return ""
 }
 
 // ifOwnerReferencesContains checks if the ownerReferences contains the MySQL object
