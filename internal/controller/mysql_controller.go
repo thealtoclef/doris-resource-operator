@@ -28,11 +28,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
+	"github.com/nakamasato/mysql-operator/internal/constants"
 	mysqlinternal "github.com/nakamasato/mysql-operator/internal/mysql"
+	"github.com/nakamasato/mysql-operator/internal/utils"
 )
 
 const mysqlFinalizer = "mysql.nakamasato.com/finalizer"
@@ -74,15 +75,6 @@ func (r *MySQLReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 		log.Error(err, "[FetchMySQL] Failed to get MySQL")
 		return ctrl.Result{}, err
-	}
-
-	// Add a finalizer if not exists
-	if controllerutil.AddFinalizer(mysql, mysqlFinalizer) {
-		if err := r.Update(ctx, mysql); err != nil {
-
-			log.Error(err, "Failed to update MySQL after adding finalizer")
-			return ctrl.Result{}, err
-		}
 	}
 
 	// Get referenced number
@@ -129,19 +121,33 @@ func (r *MySQLReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	if !mysql.GetDeletionTimestamp().IsZero() && controllerutil.ContainsFinalizer(mysql, mysqlFinalizer) {
-		if r.finalizeMySQL(ctx, mysql) {
-			if controllerutil.RemoveFinalizer(mysql, mysqlFinalizer) {
-				if err := r.Update(ctx, mysql); err != nil {
-					return ctrl.Result{}, err
-				}
+	// Handle finalizer
+	finalizerResult, finalizerErr := utils.HandleFinalizer(utils.FinalizerParams{
+		Object:    mysql,
+		Context:   ctx,
+		Client:    r.Client,
+		Finalizer: mysqlFinalizer,
+		FinalizationFunc: func() error {
+			if r.finalizeMySQL(ctx, mysql) {
+				return nil
+			} else {
+				log.Info("Could not complete finalizer. waiting another second")
+				return fmt.Errorf("finalizer could not complete")
 			}
-		} else {
-			log.Info("Could not complete finalizer. waiting another second")
+		},
+	})
+
+	if finalizerErr != nil || !mysql.GetDeletionTimestamp().IsZero() {
+		if finalizerErr != nil {
+			// Requeue after 1 second if finalization failed
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
+		// Otherwise return the result from finalizer handling
+		return finalizerResult, finalizerErr
 	}
-	return ctrl.Result{}, nil
+
+	// If there is no finalizer processing or deletion, proceed with normal reconciliation
+	return ctrl.Result{RequeueAfter: constants.ReconciliationPeriod}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

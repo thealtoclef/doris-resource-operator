@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
+	"github.com/nakamasato/mysql-operator/internal/constants"
 	. "github.com/nakamasato/mysql-operator/internal/mysql"
 )
 
@@ -100,7 +101,7 @@ var _ = Describe("MySQLUser controller", func() {
 						return ""
 					}
 					return mysqlUser.Status.Phase
-				}).Should(Equal(mysqlUserPhaseReady))
+				}).Should(Equal(constants.PhaseReady))
 
 				// status.reason should be 'both secret and mysql user are successfully created.'
 				Eventually(func() string {
@@ -109,7 +110,7 @@ var _ = Describe("MySQLUser controller", func() {
 						return ""
 					}
 					return mysqlUser.Status.Reason
-				}).Should(Equal(mysqlUserReasonCompleted))
+				}).Should(Equal(constants.ReasonCompleted))
 			})
 
 			It("Should have finalizer", func() {
@@ -311,23 +312,23 @@ var _ = Describe("MySQLUser controller", func() {
 					return errors.IsNotFound(err)
 				}).Should(BeTrue())
 
-				// Status.Phase should be NotReady
+				// status.phase should be not ready
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Phase
-				}).Should(Equal(mysqlUserPhaseNotReady))
+				}).Should(Equal(constants.PhaseNotReady))
 
-				// Status.Reason should be 'failed to connect to mysql'
+				// status.reason should be 'Failed to fetch MySQL client'
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Reason
-				}).Should(Equal(mysqlUserReasonMySQLFailedToCreateUser))
+				}).Should(Equal(constants.ReasonMySQLFetchFailed))
 			})
 		})
 
@@ -386,23 +387,23 @@ var _ = Describe("MySQLUser controller", func() {
 					return errors.IsNotFound(err)
 				}).Should(BeTrue())
 
-				// Status.Phase should be NotReady
+				// status.phase should be not ready
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Phase
-				}).Should(Equal(mysqlUserPhaseNotReady))
+				}).Should(Equal(constants.PhaseNotReady))
 
-				// Status.Reason should be 'failed to fetch MySQL'
+				// status.reason should be 'Failed to fetch MySQL client'
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Reason
-				}).Should(Equal(mysqlUserReasonMySQLFetchFailed))
+				}).Should(Equal(constants.ReasonMySQLFetchFailed))
 			})
 		})
 	})

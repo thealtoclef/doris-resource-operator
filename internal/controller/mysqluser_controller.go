@@ -38,22 +38,14 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
+	"github.com/nakamasato/mysql-operator/internal/constants"
 	"github.com/nakamasato/mysql-operator/internal/metrics"
 	mysqlinternal "github.com/nakamasato/mysql-operator/internal/mysql"
+	"github.com/nakamasato/mysql-operator/internal/utils"
 )
 
 const (
-	mysqlUserFinalizer                         = "mysqluser.nakamasato.com/finalizer"
-	mysqlUserReasonCompleted                   = "Successfully reconciled"
-	mysqlUserReasonMySQLConnectionFailed       = "Failed to connect to cluster"
-	mysqlUserReasonMySQLFailedToCreateUser     = "Failed to create user"
-	mysqlUserReasonMySQLFailedToUpdatePassword = "Failed to update password"
-	mysqlUserReasonMySQLFailedToGetSecret      = "Failed to get Secret"
-	mysqlUserReasonMYSQLFailedToGrant          = "Failed to grant"
-	mysqlUserReasonMySQLFetchFailed            = "Failed to fetch cluster"
-	mysqlUserPhaseReady                        = "Ready"
-	mysqlUserPhaseNotReady                     = "NotReady"
-	mysqlUserReasonFailedToFinalize            = "Failed to finalize"
+	mysqlUserFinalizer = "mysqluser.nakamasato.com/finalizer"
 )
 
 // MySQLUserReconciler reconciles a MySQLUser object
@@ -98,8 +90,8 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	var mysqlNamespacedName = client.ObjectKey{Namespace: req.Namespace, Name: clusterName}
 	if err := r.Get(ctx, mysqlNamespacedName, mysql); err != nil {
 		log.Error(err, "[FetchMySQL] Failed")
-		mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-		mysqlUser.Status.Reason = mysqlUserReasonMySQLFetchFailed
+		mysqlUser.Status.Phase = constants.PhaseNotReady
+		mysqlUser.Status.Reason = constants.ReasonMySQLFetchFailed
 		if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
@@ -123,8 +115,8 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Get MySQL client
 	mysqlClient, err := r.MySQLClients.GetClient(mysql.GetKey())
 	if err != nil {
-		mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-		mysqlUser.Status.Reason = mysqlUserReasonMySQLConnectionFailed
+		mysqlUser.Status.Phase = constants.PhaseNotReady
+		mysqlUser.Status.Reason = constants.ReasonMySQLConnectionFailed
 		log.Error(err, "[MySQLClient] Failed to connect to cluster", "key", mysql.GetKey(), "clusterName", clusterName)
 		if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
@@ -140,50 +132,30 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 	log.Info("[MySQLClient] Successfully connected")
 
-	// Finalize if DeletionTimestamp exists
-	if !mysqlUser.GetDeletionTimestamp().IsZero() {
-		log.Info("Resource marked for deletion")
-		if controllerutil.ContainsFinalizer(mysqlUser, mysqlUserFinalizer) {
-			log.Info("ContainsFinalizer is true")
-			// Run finalization logic
-			if err := r.finalizeMySQLUser(ctx, mysqlClient, mysqlUser); err != nil {
-				log.Error(err, "Failed to finalize")
-				mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-				mysqlUser.Status.Reason = mysqlUserReasonFailedToFinalize
-				if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
-					log.Error(serr, "Failed to update finalization status")
-				}
-				return ctrl.Result{}, err
+	// Handle finalizer
+	finalizerResult, finalizerErr := utils.HandleFinalizer(utils.FinalizerParams{
+		Object:    mysqlUser,
+		Context:   ctx,
+		Client:    r.Client,
+		Finalizer: mysqlUserFinalizer,
+		FinalizationFunc: func() error {
+			return r.finalizeMySQLUser(ctx, mysqlClient, mysqlUser)
+		},
+		OnFailure: func(err error) error {
+			mysqlUser.Status.Phase = constants.PhaseNotReady
+			mysqlUser.Status.Reason = constants.ReasonFailedToFinalize
+			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
+				log.Error(serr, "Failed to update finalization status")
+				return serr
 			}
-			log.Info("Finalization completed")
+			return nil
+		},
+	})
 
-			// Remove finalizer
-			if controllerutil.RemoveFinalizer(mysqlUser, mysqlUserFinalizer) {
-				log.Info("Removing finalizer")
-				err := r.Update(ctx, mysqlUser)
-				if err != nil {
-					log.Error(err, "Failed to remove finalizer")
-					return ctrl.Result{}, err
-				}
-				log.Info("Finalizer removed")
-			}
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, nil // should return success when not having the finalizer
-	}
-
-	// Add finalizer for this CR
-	log.Info("Add Finalizer for this CR")
-	if controllerutil.AddFinalizer(mysqlUser, mysqlUserFinalizer) {
-		log.Info("Added Finalizer")
-		err = r.Update(ctx, mysqlUser)
-		if err != nil {
-			log.Info("Failed to update after adding finalizer")
-			return ctrl.Result{}, err // requeue
-		}
-		log.Info("Updated successfully after adding finalizer")
-	} else {
-		log.Info("Already has finalizer")
+	if finalizerErr != nil || !mysqlUser.GetDeletionTimestamp().IsZero() {
+		// If finalizer processing returned an error or object is being deleted,
+		// return the result from finalizer handling
+		return finalizerResult, finalizerErr
 	}
 
 	// Skip all the following steps if MySQL is being Deleted
@@ -197,8 +169,8 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	err = r.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: passwordSecretRef.Name}, secret)
 	if err != nil {
 		log.Error(err, "[password] Failed to get Secret", "passwordSecretRef", passwordSecretRef)
-		mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-		mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToGetSecret
+		mysqlUser.Status.Phase = constants.PhaseNotReady
+		mysqlUser.Status.Reason = constants.ReasonFailedToGetSecret
 		if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
@@ -216,8 +188,8 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			fmt.Sprintf("CREATE USER IF NOT EXISTS %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
 			log.Error(err, "[MySQL] Failed to create User", "clusterName", clusterName, "userIdentity", userIdentity)
-			mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-			mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToCreateUser
+			mysqlUser.Status.Phase = constants.PhaseNotReady
+			mysqlUser.Status.Reason = constants.ReasonMySQLFailedToCreateUser
 			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 				log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
@@ -234,8 +206,8 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			fmt.Sprintf("ALTER USER %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
 			log.Error(err, "[MySQL] Failed to update password of User", "clusterName", clusterName, "userIdentity", userIdentity)
-			mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-			mysqlUser.Status.Reason = mysqlUserReasonMySQLFailedToUpdatePassword
+			mysqlUser.Status.Phase = constants.PhaseNotReady
+			mysqlUser.Status.Reason = constants.ReasonMySQLFailedToUpdatePassword
 			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 				log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
@@ -249,22 +221,23 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	err = r.updateGrants(ctx, mysqlClient, userIdentity, grants)
 	if err != nil {
 		log.Error(err, "[MySQL] Failed to update Grants", "clusterName", clusterName, "userIdentity", userIdentity)
-		mysqlUser.Status.Phase = mysqlUserPhaseNotReady
-		mysqlUser.Status.Reason = mysqlUserReasonMYSQLFailedToGrant
+		mysqlUser.Status.Phase = constants.PhaseNotReady
+		mysqlUser.Status.Reason = constants.ReasonMySQLFailedToGrant
 		if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
 		}
 		return ctrl.Result{}, err
 	}
-	// Update phase and reason of MySQLUser status to Ready and Completed
-	mysqlUser.Status.Phase = mysqlUserPhaseReady
-	mysqlUser.Status.Reason = mysqlUserReasonCompleted
+	// Update status
+	mysqlUser.Status.Phase = constants.PhaseReady
+	mysqlUser.Status.Reason = constants.ReasonCompleted
 	if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
 		log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: constants.ReconciliationPeriod}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

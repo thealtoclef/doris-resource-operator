@@ -36,21 +36,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
+	"github.com/nakamasato/mysql-operator/internal/constants"
 	metrics "github.com/nakamasato/mysql-operator/internal/metrics"
 	mysqlinternal "github.com/nakamasato/mysql-operator/internal/mysql"
+	"github.com/nakamasato/mysql-operator/internal/utils"
 )
 
 const (
-	catalogFinalizer                   = "catalog.nakamasato.com/finalizer"
-	catalogReasonCompleted             = "Catalog successfully reconciled"
-	catalogReasonMySQLConnectionFailed = "Failed to connect to cluster"
-	catalogReasonFailedToCreateCatalog = "Failed to create catalog"
-	catalogReasonFailedToGetSecret     = "Failed to get Secret"
-	catalogReasonFailedToDropCatalog   = "Failed to drop catalog"
-	catalogPhaseReady                  = "Ready"
-	catalogPhaseNotReady               = "NotReady"
-	catalogReasonFailedToFinalize      = "Failed to finalize"
-	catalogReasonMySQLFetchFailed      = "Failed to fetch cluster"
+	catalogFinalizer = "catalog.nakamasato.com/finalizer"
 )
 
 // CatalogReconciler reconciles a Catalog object
@@ -100,8 +93,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var mysqlNamespacedName = client.ObjectKey{Namespace: req.Namespace, Name: clusterName}
 	if err := r.Get(ctx, mysqlNamespacedName, mysql); err != nil {
 		log.Error(err, "[FetchMySQL] Failed")
-		catalog.Status.Phase = catalogPhaseNotReady
-		catalog.Status.Reason = catalogReasonMySQLFetchFailed
+		catalog.Status.Phase = constants.PhaseNotReady
+		catalog.Status.Reason = constants.ReasonMySQLFetchFailed
 		if serr := r.Status().Update(ctx, catalog); serr != nil {
 			log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
@@ -125,8 +118,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Get MySQL client
 	mysqlClient, err := r.MySQLClients.GetClient(mysql.GetKey())
 	if err != nil {
-		catalog.Status.Phase = catalogPhaseNotReady
-		catalog.Status.Reason = catalogReasonMySQLConnectionFailed
+		catalog.Status.Phase = constants.PhaseNotReady
+		catalog.Status.Reason = constants.ReasonMySQLConnectionFailed
 		log.Error(err, "[MySQLClient] Failed to connect to cluster", "key", mysql.GetKey(), "clusterName", clusterName)
 		if serr := r.Status().Update(ctx, catalog); serr != nil {
 			log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
@@ -142,50 +135,30 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	log.Info("[MySQLClient] Successfully connected")
 
-	// Finalize if DeletionTimestamp exists
-	if !catalog.GetDeletionTimestamp().IsZero() {
-		log.Info("Resource marked for deletion")
-		if controllerutil.ContainsFinalizer(catalog, catalogFinalizer) {
-			log.Info("ContainsFinalizer is true")
-			// Run finalization logic
-			if err := r.finalizeCatalog(ctx, mysqlClient, catalog); err != nil {
-				log.Error(err, "Failed to finalize Catalog")
-				catalog.Status.Phase = catalogPhaseNotReady
-				catalog.Status.Reason = catalogReasonFailedToFinalize
-				if serr := r.Status().Update(ctx, catalog); serr != nil {
-					log.Error(serr, "Failed to update finalization status")
-				}
-				return ctrl.Result{}, err
+	// Handle finalizer
+	finalizerResult, finalizerErr := utils.HandleFinalizer(utils.FinalizerParams{
+		Object:    catalog,
+		Context:   ctx,
+		Client:    r.Client,
+		Finalizer: catalogFinalizer,
+		FinalizationFunc: func() error {
+			return r.finalizeCatalog(ctx, mysqlClient, catalog)
+		},
+		OnFailure: func(err error) error {
+			catalog.Status.Phase = constants.PhaseNotReady
+			catalog.Status.Reason = constants.ReasonFailedToFinalize
+			if serr := r.Status().Update(ctx, catalog); serr != nil {
+				log.Error(serr, "Failed to update finalization status")
+				return serr
 			}
-			log.Info("Finalization completed")
+			return nil
+		},
+	})
 
-			// Remove finalizer
-			if controllerutil.RemoveFinalizer(catalog, catalogFinalizer) {
-				log.Info("Removing finalizer")
-				err := r.Update(ctx, catalog)
-				if err != nil {
-					log.Error(err, "Failed to remove finalizer")
-					return ctrl.Result{}, err
-				}
-				log.Info("Finalizer removed")
-			}
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, nil // should return success when not having the finalizer
-	}
-
-	// Add finalizer if not exists
-	log.Info("Add Finalizer for this CR")
-	if controllerutil.AddFinalizer(catalog, catalogFinalizer) {
-		log.Info("Added Finalizer")
-		err = r.Update(ctx, catalog)
-		if err != nil {
-			log.Info("Failed to update after adding finalizer")
-			return ctrl.Result{}, err // requeue
-		}
-		log.Info("Updated successfully after adding finalizer")
-	} else {
-		log.Info("Already has finalizer")
+	if finalizerErr != nil || !catalog.GetDeletionTimestamp().IsZero() {
+		// If finalizer processing returned an error or object is being deleted,
+		// return the result from finalizer handling
+		return finalizerResult, finalizerErr
 	}
 
 	// Skip if MySQL is being deleted
@@ -198,8 +171,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	exists, err := r.catalogExists(ctx, mysqlClient, catalog.Spec.Name)
 	if err != nil {
 		log.Error(err, "[Catalog] Failed to check if catalog exists", "clusterName", clusterName, "catalogName", catalog.Spec.Name)
-		catalog.Status.Phase = catalogPhaseNotReady
-		catalog.Status.Reason = catalogReasonFailedToCreateCatalog
+		catalog.Status.Phase = constants.PhaseNotReady
+		catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
 		if serr := r.Status().Update(ctx, catalog); serr != nil {
 			log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -212,8 +185,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		err := r.createCatalog(ctx, mysqlClient, catalog)
 		if err != nil {
 			log.Error(err, "Failed to create catalog")
-			catalog.Status.Phase = catalogPhaseNotReady
-			catalog.Status.Reason = catalogReasonFailedToCreateCatalog
+			catalog.Status.Phase = constants.PhaseNotReady
+			catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
 			if serr := r.Status().Update(ctx, catalog); serr != nil {
 				log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -229,8 +202,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		_, err := r.getCatalogProperties(ctx, mysqlClient, catalog.Spec.Name)
 		if err != nil {
 			log.Error(err, "Failed to fetch catalog properties")
-			catalog.Status.Phase = catalogPhaseNotReady
-			catalog.Status.Reason = catalogReasonFailedToCreateCatalog
+			catalog.Status.Phase = constants.PhaseNotReady
+			catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
 			if serr := r.Status().Update(ctx, catalog); serr != nil {
 				log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -243,8 +216,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Update catalog if exists
 		if err := r.updateCatalog(ctx, mysqlClient, catalog); err != nil {
 			log.Error(err, "Failed to update catalog")
-			catalog.Status.Phase = catalogPhaseNotReady
-			catalog.Status.Reason = catalogReasonFailedToCreateCatalog
+			catalog.Status.Phase = constants.PhaseNotReady
+			catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
 			if serr := r.Status().Update(ctx, catalog); serr != nil {
 				log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -255,14 +228,14 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Update status
-	catalog.Status.Phase = catalogPhaseReady
-	catalog.Status.Reason = catalogReasonCompleted
+	catalog.Status.Phase = constants.PhaseReady
+	catalog.Status.Reason = constants.ReasonCompleted
 	if serr := r.Status().Update(ctx, catalog); serr != nil {
 		log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: constants.ReconciliationPeriod}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
