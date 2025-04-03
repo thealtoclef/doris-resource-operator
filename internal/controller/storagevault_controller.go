@@ -259,10 +259,14 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil // Return success but skip further reconciliation
 	}
 
-	// Check if storage vault exists
-	exists, err := r.storageVaultExists(ctx, mysqlClient, storageVault.Spec.Name)
+	// Get the last known vault name that was successfully created/updated in Doris
+	vaultNameInDoris := r.getLastKnownVaultName(storageVault)
+	log.Info("Vault name tracking", "specName", storageVault.Spec.Name, "lastKnownName", vaultNameInDoris)
+
+	// Check if storage vault exists - use the last known name to check
+	exists, err := r.storageVaultExists(ctx, mysqlClient, vaultNameInDoris)
 	if err != nil {
-		log.Error(err, "[StorageVault] Failed to check if storage vault exists", "clusterName", clusterName, "storageVaultName", storageVault.Spec.Name)
+		log.Error(err, "[StorageVault] Failed to check if storage vault exists", "clusterName", clusterName, "storageVaultName", vaultNameInDoris)
 		storageVault.Status.Phase = storageVaultPhaseNotReady
 		storageVault.Status.Reason = storageVaultReasonFailedToCreateVault
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
@@ -318,6 +322,19 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Update status
 	storageVault.Status.Phase = storageVaultPhaseReady
 	storageVault.Status.Reason = storageVaultReasonCompleted
+
+	// Update the last known vault name annotation for successful operations
+	if storageVault.Status.VaultCreated {
+		r.updateLastKnownVaultName(storageVault)
+	}
+
+	// Save all changes - both status and annotations
+	if err := r.Update(ctx, storageVault); err != nil {
+		log.Error(err, "Failed to update StorageVault resource", "storageVault", storageVault.Name)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+
+	// Also update status separately in case the above update didn't apply status changes
 	if serr := r.Status().Update(ctx, storageVault); serr != nil {
 		log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -404,6 +421,10 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 	}
 
 	log.Info("Storage vault created successfully")
+
+	// Update the last known vault name after successful creation
+	r.updateLastKnownVaultName(storageVault)
+
 	return nil
 }
 
@@ -412,8 +433,11 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Updating storage vault")
 
-	// Get current vault properties
-	currentProperties, err := r.getStorageVaultProperties(ctx, db, storageVault.Spec.Name)
+	// Get the last known vault name that exists in Doris
+	lastKnownName := r.getLastKnownVaultName(storageVault)
+
+	// Get current vault properties using the last known name
+	currentProperties, err := r.getStorageVaultProperties(ctx, db, lastKnownName)
 	if err != nil {
 		return fmt.Errorf("failed to get current storage vault properties: %w", err)
 	}
@@ -431,10 +455,10 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 		return nil
 	}
 
-	// Build and execute the update query
+	// Build and execute the update query - use the last known name for the ALTER command
 	propsStr := r.propertiesToSQLString(properties)
 	query := fmt.Sprintf("ALTER STORAGE VAULT %s PROPERTIES (%s)",
-		storageVault.Spec.Name, propsStr)
+		lastKnownName, propsStr)
 
 	_, err = db.ExecContext(ctx, query)
 	if err != nil {
@@ -443,6 +467,10 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	}
 
 	log.Info("Storage vault updated successfully")
+
+	// Update the last known name after successful update
+	r.updateLastKnownVaultName(storageVault)
+
 	return nil
 }
 
@@ -533,9 +561,23 @@ func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysq
 			}
 		}
 
-		// For updates, add VAULT_NAME if needed
-		if mode == PropertyModeUpdate && storageVault.Spec.Name != storageVault.Name {
-			properties["VAULT_NAME"] = storageVault.Spec.Name
+		// For updates, check if we need to change the vault name
+		if mode == PropertyModeUpdate {
+			// The desired vault name in Doris
+			desiredVaultName := storageVault.Spec.Name
+
+			// Get the actual current name from the database properties
+			currentVaultName, ok := currentProperties["name"]
+			if !ok {
+				logger.Info("Could not find current vault name in properties, skipping name check")
+				// This should never happen since we set the name in parseStorageVaultRow
+			} else {
+				// Only add VAULT_NAME to the properties if the current vault name is different from the desired name
+				if currentVaultName != desiredVaultName {
+					logger.Info("Vault name needs to change", "from", currentVaultName, "to", desiredVaultName)
+					properties["VAULT_NAME"] = desiredVaultName
+				}
+			}
 		}
 
 	case mysqlv1alpha1.HDFSVaultType:
@@ -742,4 +784,24 @@ func (r *StorageVaultReconciler) propertiesToSQLString(properties map[string]str
 		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
 	}
 	return strings.Join(props, ", ")
+}
+
+// Add a new method to store the last known vault name in the status
+func (r *StorageVaultReconciler) updateLastKnownVaultName(storageVault *mysqlv1alpha1.StorageVault) {
+	// Track the last known vault name in an annotation
+	if storageVault.Annotations == nil {
+		storageVault.Annotations = make(map[string]string)
+	}
+	storageVault.Annotations["last-known-vault-name"] = storageVault.Spec.Name
+}
+
+// Add a new method to get the last known vault name
+func (r *StorageVaultReconciler) getLastKnownVaultName(storageVault *mysqlv1alpha1.StorageVault) string {
+	if storageVault.Annotations != nil {
+		if name, ok := storageVault.Annotations["last-known-vault-name"]; ok && name != "" {
+			return name
+		}
+	}
+	// If no annotation found, use the current spec name as default
+	return storageVault.Spec.Name
 }
