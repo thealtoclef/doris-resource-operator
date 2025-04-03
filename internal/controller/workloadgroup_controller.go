@@ -167,10 +167,10 @@ func (r *WorkloadGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil // Return success but skip further reconciliation
 	}
 
-	// Check if workload group exists
-	exists, err := r.workloadGroupExists(ctx, mysqlClient, workloadGroup.Spec.Name)
+	// Fetch workload group information from Doris - checks existence and gets properties in a single operation
+	exists, properties, err := r.fetchWorkloadGroup(ctx, mysqlClient, workloadGroup.Spec.Name)
 	if err != nil {
-		log.Error(err, "Failed to check if workload group exists", "clusterName", clusterName, "workloadGroupName", workloadGroup.Spec.Name)
+		log.Error(err, "Failed to fetch workload group information", "clusterName", clusterName, "workloadGroupName", workloadGroup.Spec.Name)
 		workloadGroup.Status.Phase = constants.PhaseNotReady
 		workloadGroup.Status.Reason = constants.ReasonFailedToCreateWorkloadGroup
 		if serr := r.Status().Update(ctx, workloadGroup); serr != nil {
@@ -198,8 +198,8 @@ func (r *WorkloadGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		metrics.WorkloadGroupCreatedTotal.Increment()
 	} else {
 		workloadGroup.Status.WorkloadGroupCreated = true
-		// Update workload group
-		if err := r.updateWorkloadGroup(ctx, mysqlClient, workloadGroup); err != nil {
+		// Update workload group with the fetched properties
+		if err := r.updateWorkloadGroup(ctx, mysqlClient, workloadGroup, properties); err != nil {
 			log.Error(err, "Failed to update workload group", "name", workloadGroup.Spec.Name)
 			workloadGroup.Status.Phase = constants.PhaseNotReady
 			workloadGroup.Status.Reason = constants.ReasonFailedToUpdateWorkloadGroup
@@ -252,52 +252,17 @@ func (r *WorkloadGroupReconciler) finalizeWorkloadGroup(ctx context.Context, db 
 	return nil
 }
 
-// workloadGroupExists checks if a workload group exists
-func (r *WorkloadGroupReconciler) workloadGroupExists(ctx context.Context, db *sql.DB, name string) (bool, error) {
+// fetchWorkloadGroup checks if a workload group exists and returns its properties in a single operation
+func (r *WorkloadGroupReconciler) fetchWorkloadGroup(ctx context.Context, db *sql.DB, name string) (bool, map[string]string, error) {
 	log := log.FromContext(ctx).WithName("WorkloadGroupReconciler").WithValues("workloadGroup", name)
-	log.Info("Checking if workload group exists")
-
-	// Use SHOW WORKLOAD GROUPS LIKE to check for existence - this is more efficient
-	query := fmt.Sprintf("SHOW WORKLOAD GROUPS LIKE '%s'", name)
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		log.Error(err, "Failed to execute SHOW WORKLOAD GROUPS LIKE query")
-		return false, err
-	}
-	defer rows.Close()
-
-	// Just check if we have any rows to determine existence
-	exists := false
-	if rows.Next() {
-		exists = true
-		// Don't need to fetch data, just checking existence
-	}
-
-	if err := rows.Err(); err != nil {
-		log.Error(err, "Error checking workload group existence")
-		return false, err
-	}
-
-	if exists {
-		log.Info("Workload group exists")
-	} else {
-		log.Info("Workload group does not exist")
-	}
-
-	return exists, nil
-}
-
-// getWorkloadGroupProperties fetches the properties of a workload group
-func (r *WorkloadGroupReconciler) getWorkloadGroupProperties(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
-	log := log.FromContext(ctx).WithName("WorkloadGroupReconciler").WithValues("workloadGroup", name)
-	log.Info("Fetching workload group properties")
+	log.Info("Fetching workload group information")
 
 	// Execute SHOW WORKLOAD GROUPS LIKE query
 	query := fmt.Sprintf("SHOW WORKLOAD GROUPS LIKE '%s'", name)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute SHOW WORKLOAD GROUPS LIKE query")
-		return nil, err
+		return false, nil, err
 	}
 	defer rows.Close()
 
@@ -305,8 +270,12 @@ func (r *WorkloadGroupReconciler) getWorkloadGroupProperties(ctx context.Context
 	columns, err := rows.Columns()
 	if err != nil {
 		log.Error(err, "Error getting column names from result")
-		return nil, err
+		return false, nil, err
 	}
+
+	// Check if we have any rows to determine existence
+	exists := false
+	properties := make(map[string]string)
 
 	// Create values slice to hold the column values
 	values := make([]any, len(columns))
@@ -316,14 +285,13 @@ func (r *WorkloadGroupReconciler) getWorkloadGroupProperties(ctx context.Context
 		valuePtrs[i] = &values[i]
 	}
 
-	properties := make(map[string]string)
-
 	// Process rows
 	if rows.Next() {
+		exists = true
 		// Scan the row into the slice of pointers
 		if err := rows.Scan(valuePtrs...); err != nil {
 			log.Error(err, "Error scanning row from SHOW WORKLOAD GROUPS result")
-			return nil, err
+			return true, nil, err // Workload group exists but we failed to scan properties
 		}
 
 		// Convert the values to strings and populate the properties map
@@ -350,10 +318,16 @@ func (r *WorkloadGroupReconciler) getWorkloadGroupProperties(ctx context.Context
 
 	if err := rows.Err(); err != nil {
 		log.Error(err, "Error iterating over workload group properties")
-		return nil, err
+		return false, nil, err
 	}
 
-	return properties, nil
+	if exists {
+		log.Info("Workload group exists and properties fetched")
+		return true, properties, nil
+	}
+
+	log.Info("Workload group does not exist")
+	return false, nil, nil
 }
 
 // createWorkloadGroup creates a new workload group in Doris
@@ -387,16 +361,9 @@ func (r *WorkloadGroupReconciler) createWorkloadGroup(ctx context.Context, db *s
 }
 
 // updateWorkloadGroup updates an existing workload group in Doris
-func (r *WorkloadGroupReconciler) updateWorkloadGroup(ctx context.Context, db *sql.DB, workloadGroup *mysqlv1alpha1.WorkloadGroup) error {
+func (r *WorkloadGroupReconciler) updateWorkloadGroup(ctx context.Context, db *sql.DB, workloadGroup *mysqlv1alpha1.WorkloadGroup, currentProps map[string]string) error {
 	log := log.FromContext(ctx).WithName("WorkloadGroupReconciler").WithValues("workloadGroup", workloadGroup.Spec.Name)
 	log.Info("Checking if workload group needs updating")
-
-	// Get current properties of the workload group
-	currentProps, err := r.getWorkloadGroupProperties(ctx, db, workloadGroup.Spec.Name)
-	if err != nil {
-		log.Error(err, "Failed to get current workload group properties")
-		return err
-	}
 
 	// Initialize desired properties map with values from the Properties field
 	desiredProps := make(map[string]string)
@@ -425,7 +392,7 @@ func (r *WorkloadGroupReconciler) updateWorkloadGroup(ctx context.Context, db *s
 			workloadGroup.Spec.Name,
 			strings.Join(props, ", "))
 
-		_, err = db.ExecContext(ctx, query)
+		_, err := db.ExecContext(ctx, query)
 		if err != nil {
 			log.Error(err, "Failed to execute ALTER WORKLOAD GROUP query")
 			return err

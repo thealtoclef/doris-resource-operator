@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -34,8 +35,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"maps"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
 	"github.com/nakamasato/mysql-operator/internal/constants"
@@ -173,10 +172,10 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	catalogNameInDoris := r.getLastKnownCatalogName(catalog)
 	log.Info("Catalog name tracking", "specName", catalog.Spec.Name, "lastKnownName", catalogNameInDoris)
 
-	// Check if catalog exists - use the last known name to check
-	exists, err := r.catalogExists(ctx, mysqlClient, catalogNameInDoris)
+	// Fetch catalog information from Doris - checks existence and gets properties in a single operation
+	exists, createCatalogStmt, err := r.fetchCatalog(ctx, mysqlClient, catalogNameInDoris)
 	if err != nil {
-		log.Error(err, "Failed to check if catalog exists", "clusterName", clusterName, "catalogName", catalogNameInDoris)
+		log.Error(err, "Failed to fetch catalog information", "clusterName", clusterName, "catalogName", catalogNameInDoris)
 		catalog.Status.Phase = constants.PhaseNotReady
 		catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
 		if serr := r.Status().Update(ctx, catalog); serr != nil {
@@ -204,8 +203,8 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		metrics.CatalogCreatedTotal.Increment()
 	} else {
 		catalog.Status.CatalogCreated = true
-		// Update catalog
-		if err := r.updateCatalog(ctx, mysqlClient, catalog, catalogNameInDoris); err != nil {
+		// Update catalog with the properties we fetched
+		if err := r.updateCatalog(ctx, mysqlClient, catalog, catalogNameInDoris, createCatalogStmt); err != nil {
 			log.Error(err, "Failed to update catalog")
 			catalog.Status.Phase = constants.PhaseNotReady
 			catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
@@ -278,55 +277,48 @@ func (r *CatalogReconciler) finalizeCatalog(ctx context.Context, db *sql.DB, cat
 	return nil
 }
 
-// catalogExists only checks if a catalog exists without fetching its properties
-func (r *CatalogReconciler) catalogExists(ctx context.Context, db *sql.DB, name string) (bool, error) {
+// fetchCatalog checks if a catalog exists and returns its properties in a single operation
+func (r *CatalogReconciler) fetchCatalog(ctx context.Context, db *sql.DB, name string) (bool, string, error) {
 	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", name)
-	log.Info("Checking if catalog exists")
+	log.Info("Fetching catalog information")
 
-	// Use SHOW CATALOGS LIKE to check for existence - this won't raise an error if the catalog doesn't exist
+	// First check if the catalog exists
 	query := fmt.Sprintf("SHOW CATALOGS LIKE '%s'", name)
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute SHOW CATALOGS LIKE query")
-		return false, err
+		return false, "", err
 	}
 	defer rows.Close()
 
-	// Just check if we have any rows to determine existence
+	// Check if we have any rows to determine existence
 	exists := false
 	if rows.Next() {
 		exists = true
-		// Don't need to fetch data, just checking existence
 	}
 
 	if err := rows.Err(); err != nil {
 		log.Error(err, "Error checking catalog existence")
-		return false, err
+		return false, "", err
 	}
 
+	// If catalog doesn't exist, return early
 	if !exists {
 		log.Info("Catalog does not exist")
-	} else {
-		log.Info("Catalog exists")
+		return false, "", nil
 	}
 
-	return exists, nil
-}
-
-// getCatalogProperties fetches catalog properties using SHOW CREATE CATALOG
-func (r *CatalogReconciler) getCatalogProperties(ctx context.Context, db *sql.DB, name string) (string, error) {
-	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", name)
-	log.Info("Fetching catalog properties")
-
+	// Catalog exists, get its properties
 	var catalogName string
 	var createCatalogStmt string
-	err := db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG %s", name)).Scan(&catalogName, &createCatalogStmt)
+	err = db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG %s", name)).Scan(&catalogName, &createCatalogStmt)
 	if err != nil {
 		log.Error(err, "Failed to get catalog properties with SHOW CREATE CATALOG")
-		return "", err
+		return true, "", err // Catalog exists but we couldn't fetch properties
 	}
 
-	return createCatalogStmt, nil
+	log.Info("Catalog exists and properties fetched")
+	return true, createCatalogStmt, nil
 }
 
 // createCatalog creates a new catalog in Doris
@@ -386,16 +378,9 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 }
 
 // updateCatalog updates an existing catalog in Doris
-func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog, catalogNameInDoris string) error {
+func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catalog *mysqlv1alpha1.Catalog, catalogNameInDoris string, currentCreateStmt string) error {
 	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", catalog.Spec.Name)
 	log.Info("Checking if catalog needs updating")
-
-	// Get current catalog properties from SHOW CREATE CATALOG statement
-	currentCreateStmt, err := r.getCatalogProperties(ctx, db, catalogNameInDoris)
-	if err != nil {
-		log.Error(err, "Failed to get current catalog properties")
-		return err
-	}
 
 	// Extract all information from the CREATE CATALOG statement
 	currentProps := r.parsePropertiesFromCreateStmt(currentCreateStmt)

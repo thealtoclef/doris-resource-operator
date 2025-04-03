@@ -274,10 +274,10 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	vaultNameInDoris := r.getLastKnownVaultName(storageVault)
 	log.Info("Vault name tracking", "specName", storageVault.Spec.Name, "lastKnownName", vaultNameInDoris)
 
-	// Check if storage vault exists - use the last known name to check
-	exists, err := r.storageVaultExists(ctx, mysqlClient, vaultNameInDoris)
+	// Fetch storage vault information from Doris - checks existence and gets properties in a single operation
+	exists, properties, err := r.fetchStorageVault(ctx, mysqlClient, vaultNameInDoris)
 	if err != nil {
-		log.Error(err, "Failed to check if storage vault exists", "clusterName", clusterName, "storageVaultName", vaultNameInDoris)
+		log.Error(err, "Failed to fetch storage vault information", "clusterName", clusterName, "storageVaultName", vaultNameInDoris)
 		storageVault.Status.Phase = constants.PhaseNotReady
 		storageVault.Status.Reason = constants.ReasonFailedToCreateVault
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
@@ -303,8 +303,8 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		metrics.StorageVaultCreatedTotal.Increment()
 	} else {
 		storageVault.Status.VaultCreated = true
-		// Update storage vault
-		if err := r.updateStorageVault(ctx, mysqlClient, storageVault); err != nil {
+		// Update storage vault with the properties we fetched
+		if err := r.updateStorageVault(ctx, mysqlClient, storageVault, properties); err != nil {
 			log.Error(err, "Failed to update storage vault")
 			storageVault.Status.Phase = constants.PhaseNotReady
 			storageVault.Status.Reason = constants.ReasonFailedToUpdateVault
@@ -361,43 +361,51 @@ func (r *StorageVaultReconciler) finalizeStorageVault(ctx context.Context, db *s
 	return fmt.Errorf("storage vault deletion is not currently supported")
 }
 
-// storageVaultExists checks if a storage vault exists
-func (r *StorageVaultReconciler) storageVaultExists(ctx context.Context, db *sql.DB, name string) (bool, error) {
+// fetchStorageVault checks if a storage vault exists and returns its properties in a single operation
+func (r *StorageVaultReconciler) fetchStorageVault(ctx context.Context, db *sql.DB, name string) (bool, map[string]string, error) {
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", name)
-	log.Info("Checking if storage vault exists")
+	log.Info("Fetching storage vault information")
 
 	// Execute SHOW STORAGE VAULTS to get all vaults
 	rows, err := db.QueryContext(ctx, "SHOW STORAGE VAULTS")
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer rows.Close()
 
-	// Parse columns based on SHOW STORAGE VAULTS output format
+	// Parse columns and look for the target vault
 	exists := false
+	var properties map[string]string
+
 	for rows.Next() {
-		var vaultName, id, properties, isDefault string
-		if err := rows.Scan(&vaultName, &id, &properties, &isDefault); err != nil {
+		var vaultName, id, propertiesStr, isDefault string
+		if err := rows.Scan(&vaultName, &id, &propertiesStr, &isDefault); err != nil {
 			log.Error(err, "Failed to scan storage vault row")
-			return false, err
+			return false, nil, err
 		}
+
 		if vaultName == name {
 			exists = true
+			// Parse the properties
+			properties, err = r.parseStorageVaultRow(ctx, vaultName, id, propertiesStr, isDefault)
+			if err != nil {
+				return true, nil, err // Vault exists but we failed to parse properties
+			}
 			break
 		}
 	}
 
 	if err := rows.Err(); err != nil {
-		return false, err
+		return false, nil, err
 	}
 
 	if exists {
-		log.Info("Storage Vault exists")
-	} else {
-		log.Info("Storage Vault does not exist")
+		log.Info("Storage Vault exists and properties fetched")
+		return true, properties, nil
 	}
 
-	return exists, nil
+	log.Info("Storage Vault does not exist")
+	return false, nil, nil
 }
 
 // createStorageVault creates a new storage vault in Doris
@@ -447,19 +455,12 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 }
 
 // updateStorageVault updates an existing storage vault in Doris
-func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault) error {
+func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql.DB, storageVault *mysqlv1alpha1.StorageVault, currentProperties map[string]string) error {
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Checking if storage vault needs updating")
 
 	// Get the last known vault name that exists in Doris
 	lastKnownName := r.getLastKnownVaultName(storageVault)
-
-	// Get current vault properties using the last known name
-	currentProperties, err := r.getStorageVaultProperties(ctx, db, lastKnownName)
-	if err != nil {
-		log.Error(err, "Failed to get current storage vault properties")
-		return err
-	}
 
 	// Check if this vault is currently set as default
 	isCurrentlyDefault := false
@@ -705,44 +706,6 @@ func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysq
 	}
 
 	return properties, nil
-}
-
-// getStorageVaultProperties retrieves the current properties of a storage vault
-func (r *StorageVaultReconciler) getStorageVaultProperties(ctx context.Context, db *sql.DB, name string) (map[string]string, error) {
-	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", name)
-	log.Info("Getting storage vault properties")
-
-	// Execute SHOW STORAGE VAULTS to get all vaults
-	rows, err := db.QueryContext(ctx, "SHOW STORAGE VAULTS")
-	if err != nil {
-		log.Error(err, "Failed to execute SHOW STORAGE VAULTS query")
-		return nil, err
-	}
-	defer rows.Close()
-
-	// Find the target vault and parse its properties
-	for rows.Next() {
-		var vaultName, id, propertiesStr, isDefault string
-		if err := rows.Scan(&vaultName, &id, &propertiesStr, &isDefault); err != nil {
-			log.Error(err, "Failed to scan storage vault row")
-			return nil, err
-		}
-
-		if vaultName == name {
-			// Parse the properties using the centralized mapping
-			properties, err := r.parseStorageVaultRow(ctx, vaultName, id, propertiesStr, isDefault)
-			if err != nil {
-				return nil, err
-			}
-			return properties, nil
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return nil, fmt.Errorf("storage vault not found: %s", name)
 }
 
 // parseStorageVaultRow parses a row from SHOW STORAGE VAULTS using the field mapping
