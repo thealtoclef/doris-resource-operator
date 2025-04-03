@@ -57,6 +57,67 @@ const (
 	s3SecretKeyField = "secret_key"
 )
 
+// VaultPropertyMode defines whether we're creating or updating a vault
+type VaultPropertyMode int
+
+const (
+	// PropertyModeCreate is used when creating a new vault
+	PropertyModeCreate VaultPropertyMode = iota
+	// PropertyModeUpdate is used when updating an existing vault
+	PropertyModeUpdate
+)
+
+// StorageVaultProperties encapsulates property handling for different vault types
+type StorageVaultProperties struct {
+	// General properties
+	Type       string
+	VaultName  string
+	Properties map[string]string
+}
+
+// FieldMapping defines mapping between CR fields and SQL properties
+type FieldMapping struct {
+	// CRToSQL maps from CR field names to SQL property names
+	CRToSQL map[string]string
+	// SQLToCR maps from SQL property names (as in SHOW output) to CR field names
+	SQLToCR map[string]string
+	// Mutable indicates which fields can be changed
+	Mutable map[string]bool
+}
+
+// Define field mappings for each vault type
+var (
+	// S3FieldMapping maps S3 properties between CR and SQL
+	S3FieldMapping = FieldMapping{
+		CRToSQL: map[string]string{
+			"endpoint":     "s3.endpoint",
+			"region":       "s3.region",
+			"rootPath":     "s3.root.path",
+			"bucket":       "s3.bucket",
+			"provider":     "provider",
+			"usePathStyle": "use_path_style",
+			"accessKey":    "s3.access_key",
+			"secretKey":    "s3.secret_key",
+		},
+		SQLToCR: map[string]string{
+			"ak":             "accessKey",
+			"sk":             "secretKey",
+			"bucket":         "bucket",
+			"prefix":         "rootPath",
+			"endpoint":       "endpoint",
+			"region":         "region",
+			"provider":       "provider",
+			"use_path_style": "usePathStyle",
+		},
+		Mutable: map[string]bool{
+			"usePathStyle": true,
+			"accessKey":    true,
+			"secretKey":    true,
+			// All other fields are immutable
+		},
+	}
+)
+
 // StorageVaultReconciler reconciles a StorageVault object
 type StorageVaultReconciler struct {
 	client.Client
@@ -324,70 +385,19 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Creating new storage vault")
 
-	// Initialize properties map
-	properties := make(map[string]string)
-
-	// Set the vault type
-	properties["type"] = string(storageVault.Spec.Type)
-
-	// Set properties based on the vault type
-	switch storageVault.Spec.Type {
-	case mysqlv1alpha1.S3VaultType:
-		// Add S3 properties
-		s3Props := storageVault.Spec.S3Properties
-		properties["s3.endpoint"] = s3Props.Endpoint
-		properties["s3.region"] = s3Props.Region
-		properties["s3.root.path"] = s3Props.RootPath
-		properties["s3.bucket"] = s3Props.Bucket
-		properties["provider"] = string(s3Props.Provider)
-
-		if s3Props.UsePathStyle != nil {
-			properties["use_path_style"] = fmt.Sprintf("%t", *s3Props.UsePathStyle)
-		}
-
-		// Get access_key and secret_key from the secret
-		secret := &v1.Secret{}
-		err := r.Get(ctx, types.NamespacedName{
-			Namespace: storageVault.Namespace,
-			Name:      s3Props.AuthSecret,
-		}, secret)
-		if err != nil {
-			log.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
-			return fmt.Errorf("failed to get auth secret: %w", err)
-		}
-
-		// Get access_key and secret_key
-		accessKey, ok := secret.Data[s3AccessKeyField]
-		if !ok {
-			return fmt.Errorf("auth secret missing required field: %s", s3AccessKeyField)
-		}
-		secretKey, ok := secret.Data[s3SecretKeyField]
-		if !ok {
-			return fmt.Errorf("auth secret missing required field: %s", s3SecretKeyField)
-		}
-
-		properties["s3.access_key"] = string(accessKey)
-		properties["s3.secret_key"] = string(secretKey)
-
-	case mysqlv1alpha1.HDFSVaultType:
-		// HDFS support to be implemented in the future
-		return fmt.Errorf("HDFS vault type is not currently supported")
-
-	default:
-		return fmt.Errorf("unsupported vault type: %s", storageVault.Spec.Type)
+	// Get properties for SQL
+	properties, err := r.crToSQL(ctx, storageVault, PropertyModeCreate, nil)
+	if err != nil {
+		log.Error(err, "Failed to get properties for creation")
+		return err
 	}
 
-	// Build properties string
-	props := make([]string, 0, len(properties))
-	for k, v := range properties {
-		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
-	}
-
+	// Build and execute the creation query
+	propsStr := r.propertiesToSQLString(properties)
 	query := fmt.Sprintf("CREATE STORAGE VAULT IF NOT EXISTS %s PROPERTIES (%s)",
-		storageVault.Spec.Name,
-		strings.Join(props, ", "))
+		storageVault.Spec.Name, propsStr)
 
-	_, err := db.ExecContext(ctx, query)
+	_, err = db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to create storage vault")
 		return err
@@ -402,89 +412,29 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Updating storage vault")
 
-	// Get current vault properties to compare
+	// Get current vault properties
 	currentProperties, err := r.getStorageVaultProperties(ctx, db, storageVault.Spec.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get current storage vault properties: %w", err)
 	}
 
-	// Initialize properties map for the update
-	properties := make(map[string]string)
-
-	// Type is required in the ALTER command even though it's immutable
-	vaultType := string(storageVault.Spec.Type)
-	properties["type"] = vaultType
-
-	// Check if the vault name is changed
-	if storageVault.Spec.Name != storageVault.Name {
-		properties["VAULT_NAME"] = storageVault.Spec.Name
-	}
-
-	// Set properties based on the vault type
-	switch mysqlv1alpha1.VaultType(vaultType) {
-	case mysqlv1alpha1.S3VaultType:
-		// Add S3 properties that can be modified
-		s3Props := storageVault.Spec.S3Properties
-		if s3Props.UsePathStyle != nil {
-			properties["use_path_style"] = fmt.Sprintf("%t", *s3Props.UsePathStyle)
-		}
-
-		// Get access_key and secret_key from the secret
-		secret := &v1.Secret{}
-		err := r.Get(ctx, types.NamespacedName{
-			Namespace: storageVault.Namespace,
-			Name:      s3Props.AuthSecret,
-		}, secret)
-		if err != nil {
-			log.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
-			return fmt.Errorf("failed to get auth secret: %w", err)
-		}
-
-		// Get access_key from secret
-		accessKey, ok := secret.Data[s3AccessKeyField]
-		if !ok {
-			return fmt.Errorf("auth secret missing required field: %s", s3AccessKeyField)
-		}
-
-		// Get secret_key from secret
-		secretKey, ok := secret.Data[s3SecretKeyField]
-		if !ok {
-			return fmt.Errorf("auth secret missing required field: %s", s3SecretKeyField)
-		}
-
-		// Compare access key with current (if available)
-		currentAccessKey, hasCurrentAccessKey := currentProperties["s3.access_key"]
-		if !hasCurrentAccessKey || currentAccessKey != string(accessKey) {
-			log.Info("Access key has changed, updating both access key and secret key")
-			properties["s3.access_key"] = string(accessKey)
-			properties["s3.secret_key"] = string(secretKey)
-		} else {
-			log.Info("Access key unchanged, assuming secret key also unchanged")
-		}
-
-	case mysqlv1alpha1.HDFSVaultType:
-		// HDFS support to be implemented in the future
-		return fmt.Errorf("HDFS vault type is not currently supported")
-
-	default:
-		return fmt.Errorf("unsupported vault type: %s", vaultType)
-	}
-
-	// Build properties string
-	props := make([]string, 0, len(properties))
-	for k, v := range properties {
-		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
+	// Get properties for SQL update
+	properties, err := r.crToSQL(ctx, storageVault, PropertyModeUpdate, currentProperties)
+	if err != nil {
+		log.Error(err, "Failed to get properties for update")
+		return err
 	}
 
 	// If no properties to update, skip the update
-	if len(props) == 0 {
+	if len(properties) <= 1 { // Only contains "type"
 		log.Info("No properties to update")
 		return nil
 	}
 
+	// Build and execute the update query
+	propsStr := r.propertiesToSQLString(properties)
 	query := fmt.Sprintf("ALTER STORAGE VAULT %s PROPERTIES (%s)",
-		storageVault.Spec.Name,
-		strings.Join(props, ", "))
+		storageVault.Spec.Name, propsStr)
 
 	_, err = db.ExecContext(ctx, query)
 	if err != nil {
@@ -494,6 +444,109 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 
 	log.Info("Storage vault updated successfully")
 	return nil
+}
+
+// crToSQL converts CR properties to SQL format using the field mapping
+func (r *StorageVaultReconciler) crToSQL(ctx context.Context, storageVault *mysqlv1alpha1.StorageVault, mode VaultPropertyMode, currentProperties map[string]string) (map[string]string, error) {
+	logger := log.FromContext(ctx)
+	properties := make(map[string]string)
+	properties["type"] = string(storageVault.Spec.Type)
+
+	var mapping FieldMapping
+
+	switch storageVault.Spec.Type {
+	case mysqlv1alpha1.S3VaultType:
+		if storageVault.Spec.S3Properties == nil {
+			return nil, fmt.Errorf("S3Properties is nil")
+		}
+
+		mapping = S3FieldMapping
+		s3Props := storageVault.Spec.S3Properties
+
+		// Function to add field if needed for current mode
+		addField := func(crField string, value string) {
+			sqlField, exists := mapping.CRToSQL[crField]
+			if !exists {
+				return // Skip if no mapping exists
+			}
+
+			// For create mode, add all fields
+			if mode == PropertyModeCreate {
+				properties[sqlField] = value
+				return
+			}
+
+			// For update mode, only add mutable fields
+			if isMutable, ok := mapping.Mutable[crField]; ok && isMutable {
+				properties[sqlField] = value
+			}
+		}
+
+		// Add all the mapped fields from the S3Properties
+		addField("endpoint", s3Props.Endpoint)
+		addField("region", s3Props.Region)
+		addField("rootPath", s3Props.RootPath)
+		addField("bucket", s3Props.Bucket)
+		addField("provider", string(s3Props.Provider))
+
+		// Add usePathStyle if specified
+		if s3Props.UsePathStyle != nil {
+			addField("usePathStyle", fmt.Sprintf("%t", *s3Props.UsePathStyle))
+		}
+
+		// Get access_key and secret_key from the secret
+		secret := &v1.Secret{}
+		err := r.Get(ctx, types.NamespacedName{
+			Namespace: storageVault.Namespace,
+			Name:      s3Props.AuthSecret,
+		}, secret)
+		if err != nil {
+			logger.Error(err, "Failed to get auth secret", "secretName", s3Props.AuthSecret)
+			return nil, fmt.Errorf("failed to get auth secret: %w", err)
+		}
+
+		// Extract access_key
+		accessKey, ok := secret.Data[s3AccessKeyField]
+		if !ok {
+			return nil, fmt.Errorf("auth secret missing required field: %s", s3AccessKeyField)
+		}
+
+		// Extract secret_key
+		secretKey, ok := secret.Data[s3SecretKeyField]
+		if !ok {
+			return nil, fmt.Errorf("auth secret missing required field: %s", s3SecretKeyField)
+		}
+
+		if mode == PropertyModeCreate {
+			// For create, always add both
+			addField("accessKey", string(accessKey))
+			addField("secretKey", string(secretKey))
+		} else if mode == PropertyModeUpdate {
+			// For update, check if access key has changed
+			currentAccessKey, hasCurrentAccessKey := currentProperties["s3.access_key"]
+			if !hasCurrentAccessKey || currentAccessKey != string(accessKey) {
+				logger.Info("Access key has changed, updating both access key and secret key")
+				addField("accessKey", string(accessKey))
+				addField("secretKey", string(secretKey))
+			} else {
+				logger.Info("Access key unchanged, assuming secret key also unchanged")
+			}
+		}
+
+		// For updates, add VAULT_NAME if needed
+		if mode == PropertyModeUpdate && storageVault.Spec.Name != storageVault.Name {
+			properties["VAULT_NAME"] = storageVault.Spec.Name
+		}
+
+	case mysqlv1alpha1.HDFSVaultType:
+		// HDFS support to be implemented in the future
+		return nil, fmt.Errorf("HDFS vault type is not currently supported")
+
+	default:
+		return nil, fmt.Errorf("unsupported vault type: %s", storageVault.Spec.Type)
+	}
+
+	return properties, nil
 }
 
 // getStorageVaultProperties retrieves the current properties of a storage vault
@@ -516,26 +569,11 @@ func (r *StorageVaultReconciler) getStorageVaultProperties(ctx context.Context, 
 		}
 
 		if vaultName == name {
-			// Parse the properties string
-			properties := make(map[string]string)
-
-			// More robust parsing of key-value pairs
-			// Properties are typically in format "key: value"
-			pairs := strings.Split(propertiesStr, ", ")
-			for _, pair := range pairs {
-				parts := strings.SplitN(pair, ": ", 2)
-				if len(parts) == 2 {
-					key := strings.TrimSpace(parts[0])
-					value := strings.TrimSpace(parts[1])
-					// Remove quotes if present
-					value = strings.Trim(value, "\"")
-					properties[key] = value
-				}
+			// Parse the properties using the centralized mapping
+			properties, err := r.parseStorageVaultRow(ctx, vaultName, id, propertiesStr, isDefault)
+			if err != nil {
+				return nil, err
 			}
-
-			// Add isDefault property
-			properties["isDefault"] = isDefault
-
 			return properties, nil
 		}
 	}
@@ -545,6 +583,117 @@ func (r *StorageVaultReconciler) getStorageVaultProperties(ctx context.Context, 
 	}
 
 	return nil, fmt.Errorf("storage vault not found: %s", name)
+}
+
+// parseStorageVaultRow parses a row from SHOW STORAGE VAULTS using the field mapping
+func (r *StorageVaultReconciler) parseStorageVaultRow(ctx context.Context, vaultName, id, propertiesStr, isDefault string) (map[string]string, error) {
+	// Try to determine vault type from properties
+	var mapping FieldMapping
+	if strings.Contains(propertiesStr, "endpoint:") {
+		mapping = S3FieldMapping
+	} else {
+		// Default to S3 mapping for now, extend as needed
+		mapping = S3FieldMapping
+	}
+
+	// Parse the raw properties string
+	rawProps := r.parsePropertiesString(propertiesStr)
+
+	// Map the property keys using the mapping
+	properties := make(map[string]string)
+	for rawKey, value := range rawProps {
+		// First, check if this is a field we know how to map
+		if sqlKey, exists := mapping.SQLToCR[rawKey]; exists {
+			// Map using the CR field name for consistency
+			if crKey, exists := mapping.CRToSQL[sqlKey]; exists {
+				properties[crKey] = value
+			}
+		} else {
+			// For unmapped fields, keep the original key
+			properties[rawKey] = value
+		}
+	}
+
+	// Add type based on inference
+	properties["type"] = string(mysqlv1alpha1.S3VaultType)
+
+	// Add metadata
+	properties["name"] = vaultName
+	properties["id"] = id
+	properties["isDefault"] = isDefault
+
+	return properties, nil
+}
+
+// parsePropertiesString parses a properties string from SHOW STORAGE VAULTS
+func (r *StorageVaultReconciler) parsePropertiesString(propertiesStr string) map[string]string {
+	properties := make(map[string]string)
+
+	// Parse the properties string
+	insideQuote := false
+	currentKey := ""
+	currentValue := ""
+	collectingValue := false
+
+	// Split the properties string into key-value pairs
+	for i := 0; i < len(propertiesStr); i++ {
+		char := propertiesStr[i]
+
+		// Handle quotes
+		if char == '"' {
+			insideQuote = !insideQuote
+			if collectingValue {
+				currentValue += string(char)
+			}
+			continue
+		}
+
+		// If inside quotes, add character to current value
+		if insideQuote {
+			if collectingValue {
+				currentValue += string(char)
+			}
+			continue
+		}
+
+		// Handle key-value separator
+		if char == ':' && !collectingValue {
+			collectingValue = true
+			currentKey = strings.TrimSpace(currentKey)
+			continue
+		}
+
+		// Handle end of value (space outside quotes)
+		if char == ' ' && collectingValue {
+			// Store the key-value pair if we have both
+			if currentKey != "" && currentValue != "" {
+				// Trim quotes from value
+				currentValue = strings.Trim(currentValue, "\"")
+				properties[currentKey] = currentValue
+			}
+
+			// Reset for next pair
+			currentKey = ""
+			currentValue = ""
+			collectingValue = false
+			continue
+		}
+
+		// Add character to current key or value
+		if collectingValue {
+			currentValue += string(char)
+		} else {
+			currentKey += string(char)
+		}
+
+		// If at the end of the string and still collecting, store the last pair
+		if i == len(propertiesStr)-1 && currentKey != "" && currentValue != "" {
+			currentValue = strings.Trim(currentValue, "\"")
+			properties[currentKey] = currentValue
+		}
+	}
+
+	return properties
 }
 
 // handleDefaultVault handles setting the default storage vault
@@ -584,4 +733,13 @@ func (r *StorageVaultReconciler) ifOwnerReferencesContains(ownerReferences []met
 		}
 	}
 	return false
+}
+
+// propertiesToSQLString converts a map of properties to a SQL string
+func (r *StorageVaultReconciler) propertiesToSQLString(properties map[string]string) string {
+	props := make([]string, 0, len(properties))
+	for k, v := range properties {
+		props = append(props, fmt.Sprintf("'%s'='%s'", k, v))
+	}
+	return strings.Join(props, ", ")
 }
