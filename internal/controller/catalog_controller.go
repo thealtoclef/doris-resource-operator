@@ -203,19 +203,6 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		catalog.Status.CatalogCreated = true
 		metrics.CatalogCreatedTotal.Increment()
 	} else {
-		// Catalog exists, fetch properties for comparison and update if needed
-		_, err := r.getCatalogProperties(ctx, mysqlClient, catalogNameInDoris)
-		if err != nil {
-			log.Error(err, "Failed to fetch catalog properties")
-			catalog.Status.Phase = constants.PhaseNotReady
-			catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
-			if serr := r.Status().Update(ctx, catalog); serr != nil {
-				log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
-				return ctrl.Result{RequeueAfter: time.Second}, nil
-			}
-			return ctrl.Result{}, err // requeue
-		}
-
 		catalog.Status.CatalogCreated = true
 		// Update catalog
 		if err := r.updateCatalog(ctx, mysqlClient, catalog, catalogNameInDoris); err != nil {
