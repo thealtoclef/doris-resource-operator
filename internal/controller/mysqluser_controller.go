@@ -480,7 +480,7 @@ func buildGrants(privs sql.NullString, targetType TargetType) ([]mysqlv1alpha1.G
 }
 
 func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string) ([]mysqlv1alpha1.Grant, error) {
-	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("FetchGrants").WithValues("userIdentity", userIdentity)
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("userIdentity", userIdentity)
 
 	// Fetch grants for the user
 	var grants []mysqlv1alpha1.Grant
@@ -530,8 +530,6 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 			grant.Privileges[col] = *ptr
 		}
 
-		log.Info("Scanned", "grant", grant)
-
 		// Process each privilege type
 		for privType, targetType := range privilegeTypeMap {
 			if priv, exists := grant.Privileges[privType]; exists {
@@ -567,7 +565,7 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 }
 
 func (r *MySQLUserReconciler) grantPrivileges(ctx context.Context, mysqlClient *sql.DB, userIdentity string, grant mysqlv1alpha1.Grant) error {
-	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("GrantPrivileges").WithValues("userIdentity", userIdentity)
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("userIdentity", userIdentity)
 
 	// Grant privileges to the user
 	_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("GRANT %s ON %s TO %s;", strings.Join(grant.Privileges, ","), grant.Target, userIdentity))
@@ -581,7 +579,7 @@ func (r *MySQLUserReconciler) grantPrivileges(ctx context.Context, mysqlClient *
 }
 
 func (r *MySQLUserReconciler) revokePrivileges(ctx context.Context, mysqlClient *sql.DB, userIdentity string, grants []mysqlv1alpha1.Grant) error {
-	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("RevokePrivileges").WithValues("userIdentity", userIdentity)
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("userIdentity", userIdentity)
 
 	// Revoke privileges from the user
 	for _, grant := range grants {
@@ -682,7 +680,7 @@ func calculateGrantDiff(oldGrants, newGrants []mysqlv1alpha1.Grant) (grantsToRev
 }
 
 func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql.DB, userIdentity string, grants []mysqlv1alpha1.Grant) error {
-	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithName("UpdateGrants").WithValues("userIdentity", userIdentity)
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("userIdentity", userIdentity)
 
 	// Validate table targets - they must have exactly 3 parts (catalog.database.table)
 	for _, grant := range grants {
