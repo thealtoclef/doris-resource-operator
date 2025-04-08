@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"gopkg.in/yaml.v3"
 	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -181,7 +183,7 @@ func (r *GlobalVariableReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Variable exists, check if value needs to be updated
-	if currentValue != globalVariable.Spec.Value {
+	if !r.compareVariableValues(currentValue, globalVariable.Spec.Value) {
 		log.Info("Updating global variable value", "variableName", globalVariable.Spec.Name,
 			"currentValue", currentValue, "desiredValue", globalVariable.Spec.Value)
 
@@ -288,6 +290,45 @@ func (r *GlobalVariableReconciler) fetchGlobalVariable(ctx context.Context, db *
 	return true, value, nil
 }
 
+// compareVariableValues compares two variable values
+// Returns true if the values are equal, false otherwise
+func (r *GlobalVariableReconciler) compareVariableValues(currentValue, desiredValue string) bool {
+	// Normalize values by trimming whitespace
+	currentValue = strings.TrimSpace(currentValue)
+	desiredValue = strings.TrimSpace(desiredValue)
+
+	// Simple string comparison - let SQL handle type conversion
+	return currentValue == desiredValue
+}
+
+// formatValueForSQL formats the value for SQL using YAML parsing for type inference
+func (r *GlobalVariableReconciler) formatValueForSQL(value string) string {
+	// Trim whitespace
+	value = strings.TrimSpace(value)
+
+	// Parse the value using YAML to infer its type
+	var parsedValue any
+	if err := yaml.Unmarshal([]byte(value), &parsedValue); err != nil {
+		// If YAML parsing fails, treat it as a string
+		return fmt.Sprintf("'%s'", value)
+	}
+
+	// Format based on the inferred type
+	switch v := parsedValue.(type) {
+	case bool:
+		return fmt.Sprintf("%t", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		return fmt.Sprintf("%g", v)
+	case string:
+		return fmt.Sprintf("'%s'", v)
+	default:
+		// For any other type, convert to string and wrap in quotes
+		return fmt.Sprintf("'%s'", value)
+	}
+}
+
 // updateGlobalVariable updates an existing global variable in Doris
 func (r *GlobalVariableReconciler) updateGlobalVariable(ctx context.Context, db *sql.DB, globalVariable *mysqlv1alpha1.GlobalVariable, currentValue string) error {
 	log := log.FromContext(ctx).WithName("GlobalVariableReconciler").WithValues("variable", globalVariable.Spec.Name)
@@ -296,8 +337,11 @@ func (r *GlobalVariableReconciler) updateGlobalVariable(ctx context.Context, db 
 		"currentValue", currentValue,
 		"desiredValue", globalVariable.Spec.Value)
 
+	// Format the value for SQL
+	formattedValue := r.formatValueForSQL(globalVariable.Spec.Value)
+
 	// Build and execute the SET GLOBAL VARIABLE query
-	query := fmt.Sprintf("SET GLOBAL VARIABLE %s = '%s'", globalVariable.Spec.Name, globalVariable.Spec.Value)
+	query := fmt.Sprintf("SET GLOBAL VARIABLE %s = %s", globalVariable.Spec.Name, formattedValue)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute SET GLOBAL VARIABLE query")
