@@ -61,6 +61,11 @@ const (
 	ReasonFailedToCreateWorkloadGroup = "Failed to create workload group"
 	ReasonFailedToDropWorkloadGroup   = "Failed to drop workload group"
 	ReasonFailedToUpdateWorkloadGroup = "Failed to update workload group"
+
+	// GlobalVariable-specific reason constants
+	ReasonFailedToFetchVariable  = "Failed to fetch variable information"
+	ReasonFailedToUpdateVariable = "Failed to update variable value"
+	ReasonVariableNotExist       = "Variable does not exist in the database"
 )
 
 // Annotation constants
