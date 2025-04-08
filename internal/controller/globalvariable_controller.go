@@ -182,23 +182,16 @@ func (r *GlobalVariableReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: constants.ReconciliationPeriod}, nil
 	}
 
-	// Variable exists, check if value needs to be updated
-	if !r.compareVariableValues(currentValue, globalVariable.Spec.Value) {
-		log.Info("Updating global variable value", "variableName", globalVariable.Spec.Name,
-			"currentValue", currentValue, "desiredValue", globalVariable.Spec.Value)
-
-		if err := r.updateGlobalVariable(ctx, mysqlClient, globalVariable, currentValue); err != nil {
-			log.Error(err, "Failed to update global variable")
-			globalVariable.Status.Phase = constants.PhaseNotReady
-			globalVariable.Status.Reason = constants.ReasonFailedToUpdateVariable
-			if serr := r.Status().Update(ctx, globalVariable); serr != nil {
-				log.Error(serr, "Failed to update GlobalVariable status", "globalVariable", globalVariable.Name)
-				return ctrl.Result{RequeueAfter: time.Second}, nil
-			}
-			return ctrl.Result{}, err // requeue
+	// Variable exists, update if needed
+	if err := r.updateGlobalVariable(ctx, mysqlClient, globalVariable, currentValue); err != nil {
+		log.Error(err, "Failed to update global variable")
+		globalVariable.Status.Phase = constants.PhaseNotReady
+		globalVariable.Status.Reason = constants.ReasonFailedToUpdateVariable
+		if serr := r.Status().Update(ctx, globalVariable); serr != nil {
+			log.Error(serr, "Failed to update GlobalVariable status", "globalVariable", globalVariable.Name)
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-	} else {
-		log.Info("Global variable value is already set to desired value", "variableName", globalVariable.Spec.Name, "value", currentValue)
+		return ctrl.Result{}, err // requeue
 	}
 
 	// Update status
@@ -332,10 +325,13 @@ func (r *GlobalVariableReconciler) formatValueForSQL(value string) string {
 // updateGlobalVariable updates an existing global variable in Doris
 func (r *GlobalVariableReconciler) updateGlobalVariable(ctx context.Context, db *sql.DB, globalVariable *mysqlv1alpha1.GlobalVariable, currentValue string) error {
 	log := log.FromContext(ctx).WithName("GlobalVariableReconciler").WithValues("variable", globalVariable.Spec.Name)
-	log.Info("Updating global variable value",
-		"variableName", globalVariable.Spec.Name,
-		"currentValue", currentValue,
-		"desiredValue", globalVariable.Spec.Value)
+	log.Info("Checking if global variable needs updating")
+
+	// Compare current and desired values
+	if r.compareVariableValues(currentValue, globalVariable.Spec.Value) {
+		log.Info("Global variable value unchanged")
+		return nil
+	}
 
 	// Format the value for SQL
 	formattedValue := r.formatValueForSQL(globalVariable.Spec.Value)
