@@ -49,22 +49,25 @@ const (
 	ReasonMySQLFailedToGrant          = "Failed to grant"
 
 	// Catalog-specific reason constants
+	ReasonFailedToFetchCatalog  = "Failed to fetch catalog"
 	ReasonFailedToCreateCatalog = "Failed to create catalog"
 	ReasonFailedToDropCatalog   = "Failed to drop catalog"
 
 	// StorageVault-specific reason constants
+	ReasonFailedToFetchVault    = "Failed to fetch vault"
 	ReasonFailedToCreateVault   = "Failed to create vault"
 	ReasonFailedToUpdateVault   = "Failed to update vault"
 	ReasonMultipleDefaultVaults = "Multiple default storage vaults defined - only one allowed"
 
 	// WorkloadGroup-specific reason constants
+	ReasonFailedToFetchWorkloadGroup  = "Failed to fetch workload group"
 	ReasonFailedToCreateWorkloadGroup = "Failed to create workload group"
 	ReasonFailedToDropWorkloadGroup   = "Failed to drop workload group"
 	ReasonFailedToUpdateWorkloadGroup = "Failed to update workload group"
 
 	// GlobalVariable-specific reason constants
-	ReasonFailedToFetchVariable  = "Failed to fetch variable information"
-	ReasonFailedToUpdateVariable = "Failed to update variable value"
+	ReasonFailedToFetchVariable  = "Failed to fetch variable"
+	ReasonFailedToUpdateVariable = "Failed to update variable"
 	ReasonVariableNotExist       = "Variable does not exist in the database"
 )
 

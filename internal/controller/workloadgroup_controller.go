@@ -163,7 +163,7 @@ func (r *WorkloadGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		log.Error(err, "Failed to fetch workload group information", "clusterName", clusterName, "workloadGroupName", workloadGroup.Spec.Name)
 		workloadGroup.Status.Phase = constants.PhaseNotReady
-		workloadGroup.Status.Reason = constants.ReasonFailedToCreateWorkloadGroup
+		workloadGroup.Status.Reason = constants.ReasonFailedToFetchWorkloadGroup
 		if serr := r.Status().Update(ctx, workloadGroup); serr != nil {
 			log.Error(serr, "Failed to update WorkloadGroup status", "workloadGroup", workloadGroup.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil

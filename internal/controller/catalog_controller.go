@@ -169,7 +169,7 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err != nil {
 		log.Error(err, "Failed to fetch catalog information", "clusterName", clusterName, "catalogName", catalogNameInDoris)
 		catalog.Status.Phase = constants.PhaseNotReady
-		catalog.Status.Reason = constants.ReasonFailedToCreateCatalog
+		catalog.Status.Reason = constants.ReasonFailedToFetchCatalog
 		if serr := r.Status().Update(ctx, catalog); serr != nil {
 			log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil

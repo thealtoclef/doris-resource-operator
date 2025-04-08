@@ -270,7 +270,7 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		log.Error(err, "Failed to fetch storage vault information", "clusterName", clusterName, "storageVaultName", vaultNameInDoris)
 		storageVault.Status.Phase = constants.PhaseNotReady
-		storageVault.Status.Reason = constants.ReasonFailedToCreateVault
+		storageVault.Status.Reason = constants.ReasonFailedToFetchVault
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
 			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
