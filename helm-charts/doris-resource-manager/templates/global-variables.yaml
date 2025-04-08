@@ -1,0 +1,13 @@
+{{- range .Values.globalVariables }}
+---
+apiVersion: mysql.nakamasato.com/v1alpha1
+kind: GlobalVariable
+metadata:
+  name: {{ template "doris-resource-manager.fullname" $ }}-{{ .name | replace "_" "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "doris-resource-manager.labels" $ | nindent 4 }}
+spec:
+  clusterName: {{ template "doris-resource-manager.fullname" $ }}
+  name: {{ .name }}
+  value: {{ .value }}
+{{- end }}
