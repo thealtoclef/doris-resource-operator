@@ -9,5 +9,5 @@ metadata:
 spec:
   clusterName: {{ template "doris-resource-manager.fullname" $ }}
   name: {{ .name }}
-  value: {{ .value }}
+  value: {{ .value | quote }}
 {{- end }}
