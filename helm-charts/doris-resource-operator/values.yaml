@@ -1,3 +1,10 @@
+# Default values for manager.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+nameOverride: ~
+fullnameOverride: ~
+
 controllerManager:
   replicas: 1
   manager:
