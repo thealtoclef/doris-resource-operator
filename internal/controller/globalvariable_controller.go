@@ -279,7 +279,7 @@ func (r *GlobalVariableReconciler) fetchGlobalVariable(ctx context.Context, db *
 		return false, "", nil
 	}
 
-	log.Info("Global variable exists and value fetched", "value", value)
+	log.Info("Global variable exists and value fetched")
 	return true, value, nil
 }
 
