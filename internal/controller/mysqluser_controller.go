@@ -410,6 +410,46 @@ var privilegeTypeMap = map[string]TargetType{
 	"CloudStagePrivs":   TableTarget,
 }
 
+// PrivilegeMapping defines the mapping between internal names and SQL names for privileges
+type PrivilegeMapping struct {
+	// InternalToSQL maps from internal names (used in SHOW GRANTS) to SQL names (used in GRANT/REVOKE)
+	InternalToSQL map[string]string
+}
+
+// privilegeNameMap maps target types to their privilege mappings
+// Only exceptional cases where the names differ are defined here
+var privilegeNameMap = map[TargetType]PrivilegeMapping{
+	ComputeGroupTarget: {
+		InternalToSQL: map[string]string{
+			"CLUSTER_USAGE_PRIV": "USAGE_PRIV",
+		},
+	},
+	// Add more exceptional mappings as needed
+}
+
+// sqlToInternalName translates a privilege name from SQL form to internal form
+func sqlToInternalName(priv string, targetType TargetType) string {
+	if mapping, exists := privilegeNameMap[targetType]; exists {
+		// Search for the SQL name in the mapping and return its internal name
+		for internalName, sqlName := range mapping.InternalToSQL {
+			if sqlName == priv {
+				return internalName
+			}
+		}
+	}
+	return priv
+}
+
+// internalToSQLName translates a privilege name from internal form to SQL form
+func internalToSQLName(priv string, targetType TargetType) string {
+	if mapping, exists := privilegeNameMap[targetType]; exists {
+		if mapped, exists := mapping.InternalToSQL[priv]; exists {
+			return mapped
+		}
+	}
+	return priv
+}
+
 func normalizeColumnOrder(perm string) string {
 	re := regexp.MustCompile(`^([^(]*)\((.*)\)$`)
 	// We may get inputs like
@@ -534,6 +574,14 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 		for privType, targetType := range privilegeTypeMap {
 			if priv, exists := grant.Privileges[privType]; exists {
 				if priv.Valid && priv.String != "" {
+					// Split the privileges string and normalize each privilege
+					privs := strings.Split(priv.String, ",")
+					normalizedPrivs := make([]string, len(privs))
+					for i, p := range privs {
+						normalizedPrivs[i] = internalToSQLName(strings.TrimSpace(p), targetType)
+					}
+					priv.String = strings.Join(normalizedPrivs, ",")
+
 					if builtGrants, err := buildGrants(priv, targetType); err != nil {
 						log.Error(err, "Build grants failed", "privilegeType", privType, "value", priv)
 						return nil, err
@@ -583,7 +631,19 @@ func (r *MySQLUserReconciler) revokePrivileges(ctx context.Context, mysqlClient 
 
 	// Revoke privileges from the user
 	for _, grant := range grants {
-		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("REVOKE %s ON %s FROM %s;", strings.Join(grant.Privileges, ","), grant.Target, userIdentity))
+		// Get the target type for this grant
+		targetType := ParseTargetType(grant.Target)
+
+		// Convert privileges to SQL form for REVOKE statement
+		sqlPrivs := make([]string, len(grant.Privileges))
+		for i, priv := range grant.Privileges {
+			sqlPrivs[i] = sqlToInternalName(priv, targetType)
+		}
+
+		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("REVOKE %s ON %s FROM %s;",
+			strings.Join(sqlPrivs, ","),
+			grant.Target,
+			userIdentity))
 		if err != nil {
 			log.Error(err, "Failed", "privileges", grant.Privileges, "target", grant.Target)
 			return err
