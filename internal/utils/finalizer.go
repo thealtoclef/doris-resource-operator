@@ -19,6 +19,7 @@ package utils
 import (
 	"context"
 
+	"github.com/nakamasato/mysql-operator/internal/constants"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -41,6 +42,25 @@ type FinalizerParams struct {
 	OnFailure func(error) error
 }
 
+// removeFinalizer is a helper function to remove a finalizer and update the object
+func removeFinalizer(ctx context.Context, client client.Client, obj client.Object, finalizer string) error {
+	log := log.FromContext(ctx).WithName("Finalizer").WithValues(
+		"name", obj.GetName(),
+		"namespace", obj.GetNamespace(),
+		"finalizer", finalizer,
+	)
+
+	if controllerutil.RemoveFinalizer(obj, finalizer) {
+		log.Info("Removing finalizer")
+		if err := client.Update(ctx, obj); err != nil {
+			log.Error(err, "Failed to update object after finalizer removal")
+			return err
+		}
+		log.Info("Finalizer removed")
+	}
+	return nil
+}
+
 // HandleFinalizer manages the finalizer for a controller
 // It returns a Result and error to be returned from the Reconcile method
 // If the object is not being deleted, it adds a finalizer if needed and returns
@@ -58,8 +78,7 @@ func HandleFinalizer(params FinalizerParams) (ctrl.Result, error) {
 	if params.Object.GetDeletionTimestamp().IsZero() {
 		if controllerutil.AddFinalizer(params.Object, params.Finalizer) {
 			log.Info("Added finalizer")
-			err := params.Client.Update(params.Context, params.Object)
-			if err != nil {
+			if err := params.Client.Update(params.Context, params.Object); err != nil {
 				log.Error(err, "Failed to update object after adding finalizer")
 				return ctrl.Result{}, err
 			}
@@ -69,34 +88,32 @@ func HandleFinalizer(params FinalizerParams) (ctrl.Result, error) {
 
 	// Resource is being deleted
 	log.Info("Resource marked for deletion")
-	if controllerutil.ContainsFinalizer(params.Object, params.Finalizer) {
-		log.Info("Finalizer exists, executing finalization logic")
-
-		// Run the specific finalization logic
-		if err := params.FinalizationFunc(); err != nil {
-			log.Error(err, "Failed to finalize resource")
-
-			// Call the failure handler if provided
-			if params.OnFailure != nil {
-				if handlerErr := params.OnFailure(err); handlerErr != nil {
-					log.Error(handlerErr, "Error in failure handler")
-				}
-			}
-
-			return ctrl.Result{}, err
-		}
-		log.Info("Finalization completed")
-
-		// Remove finalizer
-		if controllerutil.RemoveFinalizer(params.Object, params.Finalizer) {
-			log.Info("Removing finalizer")
-			err := params.Client.Update(params.Context, params.Object)
-			if err != nil {
-				log.Error(err, "Failed to remove finalizer")
-				return ctrl.Result{}, err
-			}
-			log.Info("Finalizer removed")
-		}
+	if !controllerutil.ContainsFinalizer(params.Object, params.Finalizer) {
+		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{}, nil
+
+	// Check if abandon deletion policy is set
+	if params.Object.GetAnnotations()[constants.DeletionPolicyAnnotation] == "abandon" {
+		log.Info("Using abandon deletion policy, removing finalizer without cleanup")
+		return ctrl.Result{}, removeFinalizer(params.Context, params.Client, params.Object, params.Finalizer)
+	}
+
+	log.Info("Finalizer exists, executing finalization logic")
+
+	// Run the specific finalization logic
+	if err := params.FinalizationFunc(); err != nil {
+		log.Error(err, "Failed to finalize resource")
+
+		// Call the failure handler if provided
+		if params.OnFailure != nil {
+			if handlerErr := params.OnFailure(err); handlerErr != nil {
+				log.Error(handlerErr, "Error in failure handler")
+			}
+		}
+
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Finalization completed")
+	return ctrl.Result{}, removeFinalizer(params.Context, params.Client, params.Object, params.Finalizer)
 }

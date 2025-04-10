@@ -90,6 +90,7 @@ const (
 
 // Annotation constants
 const (
+	DeletionPolicyAnnotation            = "mysql.nakamasato.com/deletion-policy"
 	StorageVaultLastKnownNameAnnotation = "mysql.nakamasato.com/last-known-vault-name"
 	CatalogLastKnownNameAnnotation      = "mysql.nakamasato.com/last-known-catalog-name"
 )
