@@ -619,10 +619,9 @@ func (r *MySQLUserReconciler) grantPrivileges(ctx context.Context, mysqlClient *
 	_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("GRANT %s ON %s TO %s;", strings.Join(grant.Privileges, ","), grant.Target, userIdentity))
 
 	if err != nil {
-		log.Error(err, "Failed", "privileges", grant.Privileges, "target", grant.Target)
+		log.Error(err, "Failed to execute GRANT query", "privileges", grant.Privileges, "target", grant.Target)
 		return nil
 	}
-	log.Info("Granted", "privileges", grant.Privileges, "target", grant.Target)
 	return nil
 }
 
@@ -645,10 +644,9 @@ func (r *MySQLUserReconciler) revokePrivileges(ctx context.Context, mysqlClient 
 			grant.Target,
 			userIdentity))
 		if err != nil {
-			log.Error(err, "Failed", "privileges", grant.Privileges, "target", grant.Target)
+			log.Error(err, "Failed to execute REVOKE query", "privileges", grant.Privileges, "target", grant.Target)
 			return err
 		}
-		log.Info("Revoked", "privileges", grant.Privileges, "target", grant.Target)
 	}
 	return nil
 }
@@ -780,8 +778,6 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 
 	// Calculate grants to revoke and grants to add
 	grantsToRevoke, grantsToAdd := calculateGrantDiff(existingGrants, grants)
-	log.Info("Grants to revoke", "count", len(grantsToRevoke), "grants", grantsToRevoke)
-	log.Info("Grants to add", "count", len(grantsToAdd), "grants", grantsToAdd)
 
 	// Revoke obsolete grants
 	if len(grantsToRevoke) > 0 {
@@ -790,6 +786,7 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 			log.Error(revokeErr, "Failed to revoke privileges")
 			return revokeErr
 		}
+		log.Info("User privileges revoked successfully")
 	}
 
 	// Grant missing grants
@@ -801,6 +798,7 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 				return grantErr
 			}
 		}
+		log.Info("User privileges granted successfully")
 	}
 
 	return nil
