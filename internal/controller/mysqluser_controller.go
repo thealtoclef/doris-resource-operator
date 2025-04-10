@@ -657,7 +657,7 @@ func (r *MySQLUserReconciler) revokePrivileges(ctx context.Context, mysqlClient 
 		// Convert privileges to SQL form for REVOKE statement
 		sqlPrivs := make([]string, len(grant.Privileges))
 		for i, priv := range grant.Privileges {
-			sqlPrivs[i] = sqlToInternalName(priv, targetType)
+			sqlPrivs[i] = internalToSQLName(priv, targetType)
 		}
 
 		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("REVOKE %s ON %s FROM %s;",
