@@ -12,6 +12,9 @@ spec:
   passwordSecretRef:
     name: {{ .passwordSecretRef.name }}
     key: {{ .passwordSecretRef.key }}
+  {{- if hasKey . "manageGrants" }}
+  manageGrants: {{ .manageGrants }}
+  {{- end }}
   {{- with .grants }}
   grants:
     {{- toYaml . | nindent 4 }}
