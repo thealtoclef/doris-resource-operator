@@ -76,33 +76,40 @@ func HandleFinalizer(params FinalizerParams) (ctrl.Result, error) {
 
 	// If resource isn't being deleted, just add the finalizer if not exists
 	if params.Object.GetDeletionTimestamp().IsZero() {
+		log.Info("Adding finalizer to resource")
 		if controllerutil.AddFinalizer(params.Object, params.Finalizer) {
-			log.Info("Added finalizer")
 			if err := params.Client.Update(params.Context, params.Object); err != nil {
 				log.Error(err, "Failed to update object after adding finalizer")
 				return ctrl.Result{}, err
 			}
+			log.Info("Successfully added finalizer to resource")
 		}
 		return ctrl.Result{}, nil
 	}
 
 	// Resource is being deleted
-	log.Info("Resource marked for deletion")
+	log.Info("Resource marked for deletion, checking finalizer status")
 	if !controllerutil.ContainsFinalizer(params.Object, params.Finalizer) {
+		log.Info("No finalizer found, skipping finalization")
 		return ctrl.Result{}, nil
 	}
 
 	// Check if abandon deletion policy is set
 	if params.Object.GetAnnotations()[constants.DeletionPolicyAnnotation] == "abandon" {
 		log.Info("Using abandon deletion policy, removing finalizer without cleanup")
-		return ctrl.Result{}, removeFinalizer(params.Context, params.Client, params.Object, params.Finalizer)
+		if err := removeFinalizer(params.Context, params.Client, params.Object, params.Finalizer); err != nil {
+			log.Error(err, "Failed to remove finalizer with abandon policy")
+			return ctrl.Result{}, err
+		}
+		log.Info("Successfully removed finalizer with abandon policy")
+		return ctrl.Result{}, nil
 	}
 
-	log.Info("Finalizer exists, executing finalization logic")
+	log.Info("Starting finalization process")
 
 	// Run the specific finalization logic
 	if err := params.FinalizationFunc(); err != nil {
-		log.Error(err, "Failed to finalize resource")
+		log.Error(err, "Failed to execute finalization logic")
 
 		// Call the failure handler if provided
 		if params.OnFailure != nil {
@@ -114,6 +121,12 @@ func HandleFinalizer(params FinalizerParams) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Finalization completed")
-	return ctrl.Result{}, removeFinalizer(params.Context, params.Client, params.Object, params.Finalizer)
+	log.Info("Finalization logic executed successfully, removing finalizer")
+	if err := removeFinalizer(params.Context, params.Client, params.Object, params.Finalizer); err != nil {
+		log.Error(err, "Failed to remove finalizer after successful finalization")
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Finalization process completed successfully")
+	return ctrl.Result{}, nil
 }
