@@ -218,16 +218,18 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Update Grants
-	err = r.updateGrants(ctx, mysqlClient, userIdentity, grants)
-	if err != nil {
-		log.Error(err, "[MySQL] Failed to update Grants", "clusterName", clusterName, "userIdentity", userIdentity)
-		mysqlUser.Status.Phase = constants.PhaseNotReady
-		mysqlUser.Status.Reason = constants.ReasonMySQLFailedToGrant
-		if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
-			log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
-			return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
+	if mysqlUser.Spec.ManageGrants {
+		err = r.updateGrants(ctx, mysqlClient, userIdentity, grants)
+		if err != nil {
+			log.Error(err, "[MySQL] Failed to update Grants", "clusterName", clusterName, "userIdentity", userIdentity)
+			mysqlUser.Status.Phase = constants.PhaseNotReady
+			mysqlUser.Status.Reason = constants.ReasonMySQLFailedToGrant
+			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
+				log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
+				return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
+			}
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, err
 	}
 	// Update status
 	mysqlUser.Status.Phase = constants.PhaseReady
@@ -250,6 +252,19 @@ func (r *MySQLUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // finalizeMySQLUser drops MySQL user
 func (r *MySQLUserReconciler) finalizeMySQLUser(ctx context.Context, mysqlClient *sql.DB, mysqlUser *mysqlv1alpha1.MySQLUser) error {
 	if mysqlUser.Status.UserCreated {
+		// Only revoke grants if ManageGrants is true
+		if mysqlUser.Spec.ManageGrants {
+			// Get existing grants
+			existingGrants, err := r.fetchGrants(ctx, mysqlClient, mysqlUser.GetUserIdentity())
+			if err != nil {
+				return err
+			}
+			// Revoke all existing grants
+			if err := r.revokePrivileges(ctx, mysqlClient, mysqlUser.GetUserIdentity(), existingGrants); err != nil {
+				return err
+			}
+		}
+		// Drop the user
 		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP USER IF EXISTS '%s'@'%s'", mysqlUser.Spec.Username, mysqlUser.Spec.Host))
 		if err != nil {
 			return err

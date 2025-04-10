@@ -85,6 +85,11 @@ spec:
                 x-kubernetes-validations:
                 - message: Host is immutable
                   rule: self == oldSelf
+              manageGrants:
+                default: true
+                description: Whether to manage grants for this user. If false, the
+                  operator will not manage any grants.
+                type: boolean
               passwordSecretRef:
                 description: Secret to reference to, which contains the password
                 properties:

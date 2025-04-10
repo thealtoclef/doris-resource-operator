@@ -63,6 +63,10 @@ type MySQLUserSpec struct {
 	// Secret to reference to, which contains the password
 	PasswordSecretRef SecretRef `json:"passwordSecretRef"`
 
+	// +kubebuilder:default=true
+	// Whether to manage grants for this user. If false, the operator will not manage any grants.
+	ManageGrants bool `json:"manageGrants,omitempty"`
+
 	// Grants of database user
 	Grants []Grant `json:"grants,omitempty"`
 }
