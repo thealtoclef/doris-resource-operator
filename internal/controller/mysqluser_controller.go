@@ -405,9 +405,9 @@ var privilegeTypeMap = map[string]TargetType{
 	// Storage privileges
 	"StorageVaultPrivs": StorageVaultTarget,
 
-	// Cloud-related privileges (all treated as table privileges)
-	"CloudClusterPrivs": TableTarget,
-	"CloudStagePrivs":   TableTarget,
+	// Cloud-related privileges (currently not supported)
+	// "CloudClusterPrivs":
+	// "CloudStagePrivs":
 }
 
 // PrivilegeMapping defines the mapping between internal names and SQL names for privileges
@@ -554,9 +554,16 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 		// Remaining fields are privileges
 		privPtrs := make(map[string]*sql.NullString)
 		for i := 4; i < len(columns); i++ {
-			priv := new(sql.NullString)
-			scanArgs[i] = priv
-			privPtrs[columns[i]] = priv
+			// Only create pointers for columns that exist in privilegeTypeMap
+			if _, exists := privilegeTypeMap[columns[i]]; exists {
+				priv := new(sql.NullString)
+				scanArgs[i] = priv
+				privPtrs[columns[i]] = priv
+			} else {
+				// For unknown columns, use a dummy pointer that we'll ignore
+				var dummy sql.NullString
+				scanArgs[i] = &dummy
+			}
 		}
 
 		err := rows.Scan(scanArgs...)
@@ -608,7 +615,6 @@ func (r *MySQLUserReconciler) fetchGrants(ctx context.Context, mysqlClient *sql.
 		grants[i].Privileges = normalizePerms(grants[i].Privileges)
 	}
 
-	log.Info("Fetched grants", "count", len(grants), "grants", grants)
 	return grants, nil
 }
 
