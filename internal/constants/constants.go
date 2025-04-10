@@ -17,22 +17,39 @@ limitations under the License.
 package constants
 
 import (
-	"github.com/nakamasato/mysql-operator/internal/utils"
+	"os"
+	"strconv"
+	"time"
 )
 
+// Default reconciliation period in seconds
+const DefaultReconciliationPeriodSeconds = 60
+
+// GetReconciliationPeriod returns the reconciliation period from environment variable
+// "RECONCILIATION_PERIOD_SECONDS" or defaults to 60 seconds if not set or invalid.
+func GetReconciliationPeriod() time.Duration {
+	envPeriod := os.Getenv("RECONCILIATION_PERIOD_SECONDS")
+	if envPeriod != "" {
+		if seconds, err := strconv.Atoi(envPeriod); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return DefaultReconciliationPeriodSeconds * time.Second
+}
+
 // ReconciliationPeriod is the time between controller reconciliations.
-// It's initialized from the utils.GetReconciliationPeriod() function which reads from
+// It's initialized from the GetReconciliationPeriod() function which reads from
 // the RECONCILIATION_PERIOD_SECONDS environment variable.
 // The value is initialized once when the package is loaded to avoid repeated environment lookups.
-var ReconciliationPeriod = utils.GetReconciliationPeriod()
+var ReconciliationPeriod = GetReconciliationPeriod()
 
-// Common status phases
+// Status phases
 const (
 	PhaseReady    = "Ready"
 	PhaseNotReady = "NotReady"
 )
 
-// Common reason constants
+// Reason constants
 const (
 	// Success reasons
 	ReasonCompleted = "Successfully reconciled"
