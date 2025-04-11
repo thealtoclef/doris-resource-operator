@@ -328,11 +328,11 @@ func (r *GlobalVariableReconciler) updateGlobalVariable(ctx context.Context, db 
 	// Format the value for SQL
 	formattedValue := r.formatValueForSQL(globalVariable.Spec.Value)
 
-	// Build and execute the SET GLOBAL VARIABLE query
-	query := fmt.Sprintf("SET GLOBAL VARIABLE %s = %s", globalVariable.Spec.Name, formattedValue)
+	// Build and execute the SET GLOBAL query
+	query := fmt.Sprintf("SET GLOBAL %s = %s", globalVariable.Spec.Name, formattedValue)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Error(err, "Failed to execute SET GLOBAL VARIABLE query")
+		log.Error(err, "Failed to execute SET GLOBAL query")
 		return err
 	}
 
