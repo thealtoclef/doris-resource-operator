@@ -15,18 +15,21 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: true if user is created
-      jsonPath: .status.userCreated
-      name: MySQLUser
-      type: boolean
-    - description: The phase of this MySQLUser
-      jsonPath: .status.phase
+    - jsonPath: .metadata.name
+      name: Name
+      type: string
+    - jsonPath: .status.phase
       name: Phase
       type: string
-    - description: The reason for the current phase of this MySQLUser
-      jsonPath: .status.reason
+    - jsonPath: .status.reason
       name: Reason
       type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.userCreated
+      name: Created
+      type: boolean
     name: v1alpha1
     schema:
       openAPIV3Schema:

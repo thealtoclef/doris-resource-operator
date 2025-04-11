@@ -15,21 +15,21 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.clusterName
-      name: Cluster
-      type: string
-    - jsonPath: .spec.name
+    - jsonPath: .metadata.name
       name: Name
-      type: string
-    - jsonPath: .spec.value
-      name: Value
       type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.reason
+      name: Reason
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.variableCreated
+      name: Created
+      type: boolean
     name: v1alpha1
     schema:
       openAPIV3Schema:

@@ -15,17 +15,23 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .metadata.name
+      name: Name
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
     - jsonPath: .status.reason
       name: Reason
       type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     - jsonPath: .status.storageVaultCreated
-      name: StorageVaultCreated
+      name: Created
       type: boolean
     - jsonPath: .status.isDefault
-      name: IsDefault
+      name: Default
       type: boolean
     name: v1alpha1
     schema:

@@ -131,12 +131,14 @@ type StorageVaultStatus struct {
 	IsDefault bool `json:"isDefault,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
-//+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
-//+kubebuilder:printcolumn:name="StorageVaultCreated",type="boolean",JSONPath=".status.storageVaultCreated"
-//+kubebuilder:printcolumn:name="IsDefault",type="boolean",JSONPath=".status.isDefault"
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Name",type="string",JSONPath=".metadata.name"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Created",type="boolean",JSONPath=".status.storageVaultCreated"
+// +kubebuilder:printcolumn:name="Default",type="boolean",JSONPath=".status.isDefault"
 
 // StorageVault is the Schema for the storagevaults API
 type StorageVault struct {

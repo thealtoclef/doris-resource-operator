@@ -15,22 +15,30 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .metadata.name
+      name: Name
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.connected
+      name: Connected
+      type: boolean
     - jsonPath: .spec.host
       name: Host
       type: string
     - jsonPath: .spec.authSecret
       name: AuthSecret
       type: string
-    - jsonPath: .status.connected
-      name: Connected
-      type: boolean
-    - description: The number of MySQLUsers that belongs to the MySQL
-      jsonPath: .status.userCount
+    - jsonPath: .status.userCount
       name: UserCount
       type: integer
-    - jsonPath: .status.reason
-      name: Reason
-      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:

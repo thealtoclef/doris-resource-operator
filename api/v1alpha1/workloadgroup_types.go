@@ -50,11 +50,13 @@ type WorkloadGroupStatus struct {
 	WorkloadGroupCreated bool `json:"workloadGroupCreated,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
-//+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
-//+kubebuilder:printcolumn:name="WorkloadGroupCreated",type="boolean",JSONPath=".status.workloadGroupCreated"
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Name",type="string",JSONPath=".metadata.name"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Created",type="boolean",JSONPath=".status.workloadGroupCreated"
 
 // WorkloadGroup is the Schema for the workloadgroups API
 type WorkloadGroup struct {

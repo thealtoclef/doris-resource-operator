@@ -15,14 +15,20 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .metadata.name
+      name: Name
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
     - jsonPath: .status.reason
       name: Reason
       type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     - jsonPath: .status.workloadGroupCreated
-      name: WorkloadGroupCreated
+      name: Created
       type: boolean
     name: v1alpha1
     schema:

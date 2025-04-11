@@ -96,11 +96,13 @@ func (m *MySQLUser) SetConditions(conditions []metav1.Condition) {
 	m.Status.Conditions = conditions
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="MySQLUser",type="boolean",JSONPath=".status.userCreated",description="true if user is created"
-//+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="The phase of this MySQLUser"
-//+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason",description="The reason for the current phase of this MySQLUser"
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Name",type="string",JSONPath=".metadata.name"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Created",type="boolean",JSONPath=".status.userCreated"
 
 // MySQLUser is the Schema for the mysqlusers API
 type MySQLUser struct {

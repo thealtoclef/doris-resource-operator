@@ -49,13 +49,13 @@ type GlobalVariableStatus struct {
 	VariableCreated bool `json:"variableCreated,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".spec.clusterName"
-//+kubebuilder:printcolumn:name="Name",type="string",JSONPath=".spec.name"
-//+kubebuilder:printcolumn:name="Value",type="string",JSONPath=".spec.value"
-//+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
-//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Name",type="string",JSONPath=".metadata.name"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Created",type="boolean",JSONPath=".status.variableCreated"
 
 // GlobalVariable is the Schema for the globalvariables API
 type GlobalVariable struct {

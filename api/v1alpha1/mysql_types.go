@@ -53,13 +53,16 @@ type MySQLStatus struct {
 	UserCount int32 `json:"userCount"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Host",type=string,JSONPath=`.spec.host`
-//+kubebuilder:printcolumn:name="AuthSecret",type=string,JSONPath=`.spec.authSecret`
-//+kubebuilder:printcolumn:name="Connected",type=boolean,JSONPath=`.status.connected`
-//+kubebuilder:printcolumn:name="UserCount",type="integer",JSONPath=".status.userCount",description="The number of MySQLUsers that belongs to the MySQL"
-//+kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.reason`
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Name",type="string",JSONPath=".metadata.name"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="Connected",type=boolean,JSONPath=".status.connected"
+// +kubebuilder:printcolumn:name="Host",type=string,JSONPath=".spec.host"
+// +kubebuilder:printcolumn:name="AuthSecret",type=string,JSONPath=".spec.authSecret"
+// +kubebuilder:printcolumn:name="UserCount",type="integer",JSONPath=".status.userCount"
 
 // MySQL is the Schema for the mysqls API
 type MySQL struct {
