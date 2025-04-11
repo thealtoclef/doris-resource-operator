@@ -198,14 +198,6 @@ func (r *GlobalVariableReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	globalVariable.Status.Phase = constants.PhaseReady
 	globalVariable.Status.Reason = constants.ReasonCompleted
 	globalVariable.Status.VariableCreated = true
-
-	// Save all changes
-	if err := r.Update(ctx, globalVariable); err != nil {
-		log.Error(err, "Failed to update GlobalVariable resource", "globalVariable", globalVariable.Name)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
-	}
-
-	// Also update status separately in case the above update didn't apply status changes
 	if serr := r.Status().Update(ctx, globalVariable); serr != nil {
 		log.Error(serr, "Failed to update GlobalVariable status", "globalVariable", globalVariable.Name)
 		return ctrl.Result{RequeueAfter: time.Second}, nil

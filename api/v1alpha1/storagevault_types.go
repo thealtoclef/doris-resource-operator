@@ -124,8 +124,8 @@ type StorageVaultStatus struct {
 	// Reason provides more information about the current phase
 	Reason string `json:"reason,omitempty"`
 
-	// VaultCreated indicates whether the vault has been created in Doris
-	VaultCreated bool `json:"vaultCreated,omitempty"`
+	// StorageVaultCreated indicates whether the storage vault has been created in Doris
+	StorageVaultCreated bool `json:"storageVaultCreated,omitempty"`
 
 	// IsDefault indicates whether this vault is set as the default storage vault
 	IsDefault bool `json:"isDefault,omitempty"`
@@ -135,7 +135,7 @@ type StorageVaultStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 //+kubebuilder:printcolumn:name="Reason",type="string",JSONPath=".status.reason"
-//+kubebuilder:printcolumn:name="VaultCreated",type="boolean",JSONPath=".status.vaultCreated"
+//+kubebuilder:printcolumn:name="StorageVaultCreated",type="boolean",JSONPath=".status.storageVaultCreated"
 //+kubebuilder:printcolumn:name="IsDefault",type="boolean",JSONPath=".status.isDefault"
 
 // StorageVault is the Schema for the storagevaults API

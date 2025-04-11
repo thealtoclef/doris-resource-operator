@@ -270,7 +270,7 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		log.Error(err, "Failed to fetch storage vault information", "clusterName", clusterName, "storageVaultName", vaultNameInDoris)
 		storageVault.Status.Phase = constants.PhaseNotReady
-		storageVault.Status.Reason = constants.ReasonFailedToFetchVault
+		storageVault.Status.Reason = constants.ReasonFailedToFetchStorageVault
 		if serr := r.Status().Update(ctx, storageVault); serr != nil {
 			log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -280,49 +280,43 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	if !exists {
 		// Create storage vault
-		if err := r.createStorageVault(ctx, mysqlClient, storageVault); err != nil {
-			log.Error(err, "Failed to create storage vault")
+		err := r.createStorageVault(ctx, mysqlClient, storageVault)
+		if err != nil {
+			log.Error(err, "Failed to create storage vault", "name", storageVault.Spec.Name)
 			storageVault.Status.Phase = constants.PhaseNotReady
-			storageVault.Status.Reason = constants.ReasonFailedToCreateVault
+			storageVault.Status.Reason = constants.ReasonFailedToCreateStorageVault
 			if serr := r.Status().Update(ctx, storageVault); serr != nil {
 				log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
 			return ctrl.Result{}, err // requeue
 		}
-		storageVault.Status.VaultCreated = true
+
+		storageVault.Status.StorageVaultCreated = true
 		metrics.StorageVaultCreatedTotal.Increment()
 	} else {
-		storageVault.Status.VaultCreated = true
-		// Update storage vault with the properties we fetched
+		storageVault.Status.StorageVaultCreated = true
+		// Update storage vault with the fetched properties
 		if err := r.updateStorageVault(ctx, mysqlClient, storageVault, properties); err != nil {
-			log.Error(err, "Failed to update storage vault")
+			log.Error(err, "Failed to update storage vault", "name", storageVault.Spec.Name)
 			storageVault.Status.Phase = constants.PhaseNotReady
-			storageVault.Status.Reason = constants.ReasonFailedToUpdateVault
+			storageVault.Status.Reason = constants.ReasonFailedToUpdateStorageVault
 			if serr := r.Status().Update(ctx, storageVault); serr != nil {
 				log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
 			return ctrl.Result{}, err // requeue
 		}
+	}
+
+	// Update annotations
+	if err := r.updateLastKnownVaultName(ctx, storageVault); err != nil {
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// Update status
 	storageVault.Status.Phase = constants.PhaseReady
 	storageVault.Status.Reason = constants.ReasonCompleted
-
-	// Update the last known vault name annotation for successful operations
-	if storageVault.Status.VaultCreated {
-		r.updateLastKnownVaultName(storageVault)
-	}
-
-	// Save all changes - both status and annotations
-	if err := r.Update(ctx, storageVault); err != nil {
-		log.Error(err, "Failed to update StorageVault resource", "storageVault", storageVault.Name)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
-	}
-
-	// Also update status separately in case the above update didn't apply status changes
 	if serr := r.Status().Update(ctx, storageVault); serr != nil {
 		log.Error(serr, "Failed to update StorageVault status", "storageVault", storageVault.Name)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -343,7 +337,7 @@ func (r *StorageVaultReconciler) finalizeStorageVault(ctx context.Context, db *s
 	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Spec.Name)
 	log.Info("Finalization requested")
 
-	if !storageVault.Status.VaultCreated {
+	if !storageVault.Status.StorageVaultCreated {
 		log.Info("Storage vault was not created, skipping finalization")
 		return nil
 	}
@@ -438,9 +432,6 @@ func (r *StorageVaultReconciler) createStorageVault(ctx context.Context, db *sql
 	}
 
 	log.Info("Storage vault created successfully")
-
-	// Update the last known vault name after successful creation
-	r.updateLastKnownVaultName(storageVault)
 
 	return nil
 }
@@ -575,9 +566,6 @@ func (r *StorageVaultReconciler) updateStorageVault(ctx context.Context, db *sql
 			log.Info("Storage vault default status unchanged")
 		}
 	}
-
-	// Update the last known name after successful update
-	r.updateLastKnownVaultName(storageVault)
 
 	return nil
 }
@@ -793,10 +781,21 @@ func (r *StorageVaultReconciler) getLastKnownVaultName(storageVault *mysqlv1alph
 	return storageVault.Spec.Name
 }
 
-// updateLastKnownVaultName sets the last known vault name annotation
-func (r *StorageVaultReconciler) updateLastKnownVaultName(storageVault *mysqlv1alpha1.StorageVault) {
+// updateLastKnownVaultName sets the last known vault name annotation and updates the resource
+func (r *StorageVaultReconciler) updateLastKnownVaultName(ctx context.Context, storageVault *mysqlv1alpha1.StorageVault) error {
+	log := log.FromContext(ctx).WithName("StorageVaultReconciler").WithValues("storageVault", storageVault.Name)
+	log.Info("Updating last known storage vault name annotation")
+
 	if storageVault.Annotations == nil {
 		storageVault.Annotations = make(map[string]string)
 	}
 	storageVault.Annotations[constants.StorageVaultLastKnownNameAnnotation] = storageVault.Spec.Name
+
+	// Save annotation changes
+	if err := r.Update(ctx, storageVault); err != nil {
+		log.Error(err, "Failed to update StorageVault annotations")
+		return err
+	}
+
+	return nil
 }

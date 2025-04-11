@@ -71,10 +71,10 @@ const (
 	ReasonFailedToDropCatalog   = "Failed to drop catalog"
 
 	// StorageVault-specific reason constants
-	ReasonFailedToFetchVault    = "Failed to fetch vault"
-	ReasonFailedToCreateVault   = "Failed to create vault"
-	ReasonFailedToUpdateVault   = "Failed to update vault"
-	ReasonMultipleDefaultVaults = "Multiple default storage vaults defined - only one allowed"
+	ReasonFailedToFetchStorageVault  = "Failed to fetch storage vault"
+	ReasonFailedToCreateStorageVault = "Failed to create storage vault"
+	ReasonFailedToUpdateStorageVault = "Failed to update storage vault"
+	ReasonMultipleDefaultVaults      = "Multiple default storage vaults defined - only one allowed"
 
 	// WorkloadGroup-specific reason constants
 	ReasonFailedToFetchWorkloadGroup  = "Failed to fetch workload group"

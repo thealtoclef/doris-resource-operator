@@ -193,6 +193,11 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		catalog.Status.CatalogCreated = true
 		metrics.CatalogCreatedTotal.Increment()
+
+		// Update last known name annotation after successful creation
+		if err := r.updateLastKnownCatalogName(ctx, catalog); err != nil {
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
 	} else {
 		catalog.Status.CatalogCreated = true
 		// Update catalog with the properties we fetched
@@ -206,24 +211,16 @@ func (r *CatalogReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			return ctrl.Result{}, err // requeue
 		}
+
+		// Update last known name annotation after successful update
+		if err := r.updateLastKnownCatalogName(ctx, catalog); err != nil {
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
 	}
 
 	// Update status
 	catalog.Status.Phase = constants.PhaseReady
 	catalog.Status.Reason = constants.ReasonCompleted
-
-	// Update the last known catalog name annotation for successful operations
-	if catalog.Status.CatalogCreated {
-		r.updateLastKnownCatalogName(catalog)
-	}
-
-	// Save all changes - both status and annotations
-	if err := r.Update(ctx, catalog); err != nil {
-		log.Error(err, "Failed to update Catalog resource", "catalog", catalog.Name)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
-	}
-
-	// Also update status separately in case the above update didn't apply status changes
 	if serr := r.Status().Update(ctx, catalog); serr != nil {
 		log.Error(serr, "Failed to update Catalog status", "catalog", catalog.Name)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
@@ -541,10 +538,21 @@ func (r *CatalogReconciler) getLastKnownCatalogName(catalog *mysqlv1alpha1.Catal
 	return catalog.Spec.Name
 }
 
-// updateLastKnownCatalogName sets the last known catalog name annotation
-func (r *CatalogReconciler) updateLastKnownCatalogName(catalog *mysqlv1alpha1.Catalog) {
+// updateLastKnownCatalogName sets the last known catalog name annotation and updates the resource
+func (r *CatalogReconciler) updateLastKnownCatalogName(ctx context.Context, catalog *mysqlv1alpha1.Catalog) error {
+	log := log.FromContext(ctx).WithName("CatalogReconciler").WithValues("catalog", catalog.Name)
+	log.Info("Updating last known catalog name annotation")
+
 	if catalog.Annotations == nil {
 		catalog.Annotations = make(map[string]string)
 	}
 	catalog.Annotations[constants.CatalogLastKnownNameAnnotation] = catalog.Spec.Name
+
+	// Save annotation changes
+	if err := r.Update(ctx, catalog); err != nil {
+		log.Error(err, "Failed to update Catalog annotations")
+		return err
+	}
+
+	return nil
 }

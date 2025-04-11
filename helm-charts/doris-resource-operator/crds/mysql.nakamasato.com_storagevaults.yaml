@@ -21,8 +21,8 @@ spec:
     - jsonPath: .status.reason
       name: Reason
       type: string
-    - jsonPath: .status.vaultCreated
-      name: VaultCreated
+    - jsonPath: .status.storageVaultCreated
+      name: StorageVaultCreated
       type: boolean
     - jsonPath: .status.isDefault
       name: IsDefault
@@ -163,9 +163,9 @@ spec:
               reason:
                 description: Reason provides more information about the current phase
                 type: string
-              vaultCreated:
-                description: VaultCreated indicates whether the vault has been created
-                  in Doris
+              storageVaultCreated:
+                description: StorageVaultCreated indicates whether the storage vault
+                  has been created in Doris
                 type: boolean
             type: object
         type: object
