@@ -74,7 +74,6 @@ const (
 	ReasonFailedToFetchStorageVault  = "Failed to fetch storage vault"
 	ReasonFailedToCreateStorageVault = "Failed to create storage vault"
 	ReasonFailedToUpdateStorageVault = "Failed to update storage vault"
-	ReasonMultipleDefaultVaults      = "Multiple default storage vaults defined - only one allowed"
 
 	// WorkloadGroup-specific reason constants
 	ReasonFailedToFetchWorkloadGroup  = "Failed to fetch workload group"

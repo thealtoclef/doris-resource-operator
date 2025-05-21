@@ -160,43 +160,6 @@ func (r *StorageVaultReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	log.Info("[FetchMySQL] Found")
 
-	// If this vault wants to be default, check for other default vaults
-	if storageVault.Spec.IsDefault != nil && *storageVault.Spec.IsDefault {
-		// Check if there are other StorageVaults with IsDefault=true for the same cluster
-		storageVaultList := &mysqlv1alpha1.StorageVaultList{}
-		if err := r.List(ctx, storageVaultList, &client.ListOptions{Namespace: req.Namespace}); err != nil {
-			log.Error(err, "Failed to list StorageVaults")
-			return ctrl.Result{}, err
-		}
-
-		// Look for other default vaults in the same cluster
-		for _, v := range storageVaultList.Items {
-			// Skip the current vault
-			if v.Name == storageVault.Name {
-				continue
-			}
-
-			// Skip vaults from other clusters
-			if v.Spec.ClusterName != storageVault.Spec.ClusterName {
-				continue
-			}
-
-			// If another vault is marked as default, raise an error
-			if v.Spec.IsDefault != nil && *v.Spec.IsDefault {
-				log.Error(nil, "Multiple StorageVaults marked as default",
-					"current", storageVault.Name, "other", v.Name)
-
-				storageVault.Status.Phase = constants.PhaseNotReady
-				storageVault.Status.Reason = constants.ReasonMultipleDefaultVaults
-				if serr := r.Status().Update(ctx, storageVault); serr != nil {
-					log.Error(serr, "Failed to update StorageVault status")
-				}
-				return ctrl.Result{}, fmt.Errorf("conflict: multiple StorageVaults marked as default for cluster %s: %s and %s",
-					clusterName, storageVault.Name, v.Name)
-			}
-		}
-	}
-
 	// SetOwnerReference if not exists
 	if !r.ifOwnerReferencesContains(storageVault.OwnerReferences, mysql) {
 		err := controllerutil.SetControllerReference(mysql, storageVault, r.Scheme)
