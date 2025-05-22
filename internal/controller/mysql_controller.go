@@ -23,16 +23,17 @@ import (
 	"time"
 
 	. "github.com/go-sql-driver/mysql"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
+	"github.com/nakamasato/mysql-operator/internal/constants"
 	mysqlinternal "github.com/nakamasato/mysql-operator/internal/mysql"
-	secret "github.com/nakamasato/mysql-operator/internal/secret"
+	"github.com/nakamasato/mysql-operator/internal/utils"
 )
 
 const mysqlFinalizer = "mysql.nakamasato.com/finalizer"
@@ -43,14 +44,12 @@ type MySQLReconciler struct {
 	Scheme          *runtime.Scheme
 	MySQLClients    mysqlinternal.MySQLClients
 	MySQLDriverName string
-	SecretManagers  map[string]secret.SecretManager
 }
 
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=mysqls,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=mysqls/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=mysqls/finalizers,verbs=update
 //+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=mysqlusers,verbs=list;
-//+kubebuilder:rbac:groups=mysql.nakamasato.com,resources=mysqldbs,verbs=list;
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -78,39 +77,24 @@ func (r *MySQLReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
-	// Add a finalizer if not exists
-	if controllerutil.AddFinalizer(mysql, mysqlFinalizer) {
-		if err := r.Update(ctx, mysql); err != nil {
-
-			log.Error(err, "Failed to update MySQL after adding finalizer")
-			return ctrl.Result{}, err
-		}
-	}
-
 	// Get referenced number
 	referencedUserNum, err := r.countReferencesByMySQLUser(ctx, mysql)
 	if err != nil {
 		log.Error(err, "Failed get referencedUserNum")
 		return ctrl.Result{}, err
 	}
-	referencedDbNum, err := r.countReferencesByMySQLDB(ctx, mysql)
-	if err != nil {
-		log.Error(err, "Failed get referencedDbNum")
-		return ctrl.Result{}, err
-	}
-	log.Info("Successfully got referenced num", "referencedUserNum", referencedUserNum, "referencedDbNum", referencedDbNum)
+	log.Info("Successfully got referenced num", "referencedUserNum", referencedUserNum)
 
 	// Update Status
-	if mysql.Status.UserCount != int32(referencedUserNum) || mysql.Status.DBCount != int32(referencedDbNum) {
+	if mysql.Status.UserCount != int32(referencedUserNum) {
 		mysql.Status.UserCount = int32(referencedUserNum)
-		mysql.Status.DBCount = int32(referencedDbNum)
 		err = r.Status().Update(ctx, mysql)
 		if err != nil {
-			log.Error(err, "[Status] Failed to update staus (UserCount and DBCount)",
-				"UserCount", referencedUserNum, "DBCount", referencedDbNum)
+			log.Error(err, "[Status] Failed to update status (UserCount)",
+				"UserCount", referencedUserNum)
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
-		log.Info("[Status] updated", "UserCount", referencedUserNum, "DBCount", referencedDbNum)
+		log.Info("[Status] updated", "UserCount", referencedUserNum)
 	}
 
 	// Update MySQLClients
@@ -137,19 +121,33 @@ func (r *MySQLReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	if !mysql.GetDeletionTimestamp().IsZero() && controllerutil.ContainsFinalizer(mysql, mysqlFinalizer) {
-		if r.finalizeMySQL(ctx, mysql) {
-			if controllerutil.RemoveFinalizer(mysql, mysqlFinalizer) {
-				if err := r.Update(ctx, mysql); err != nil {
-					return ctrl.Result{}, err
-				}
+	// Handle finalizer
+	finalizerResult, finalizerErr := utils.HandleFinalizer(utils.FinalizerParams{
+		Object:    mysql,
+		Context:   ctx,
+		Client:    r.Client,
+		Finalizer: mysqlFinalizer,
+		FinalizationFunc: func() error {
+			if r.finalizeMySQL(ctx, mysql) {
+				return nil
+			} else {
+				log.Info("Could not complete finalizer. waiting another second")
+				return fmt.Errorf("finalizer could not complete")
 			}
-		} else {
-			log.Info("Could not complete finalizer. waiting another second")
+		},
+	})
+
+	if finalizerErr != nil || !mysql.GetDeletionTimestamp().IsZero() {
+		if finalizerErr != nil {
+			// Requeue after 1 second if finalization failed
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
+		// Otherwise return the result from finalizer handling
+		return finalizerResult, finalizerErr
 	}
-	return ctrl.Result{}, nil
+
+	// If there is no finalizer processing or deletion, proceed with normal reconciliation
+	return ctrl.Result{RequeueAfter: constants.ReconciliationPeriod}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -157,7 +155,6 @@ func (r *MySQLReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mysqlv1alpha1.MySQL{}).
 		Owns(&mysqlv1alpha1.MySQLUser{}).
-		Owns(&mysqlv1alpha1.MySQLDB{}).
 		Complete(r)
 }
 
@@ -186,60 +183,40 @@ func (r *MySQLReconciler) UpdateMySQLClients(ctx context.Context, mysql *mysqlv1
 		r.MySQLClients[mysql.GetKey()] = db
 		log.Info("Successfully added MySQL client", "mysql.Name", mysql.Name)
 	}
-
-	// open connection for each MySQLDB
-	mysqlDBList := &mysqlv1alpha1.MySQLDBList{}
-	err = r.List(ctx, mysqlDBList, client.MatchingFields{"spec.mysqlName": mysql.Name})
-	if err != nil {
-		return true, err
-	}
-	for _, mysqlDB := range mysqlDBList.Items {
-		if mysqlDB.Status.Phase != "Ready" {
-			log.Info("mysqlDB is not ready", "mysqlDB", mysqlDB.Name, "mysqlDB.Status", mysqlDB.Status)
-			return true, nil
-		}
-		if _, err := r.MySQLClients.GetClient(mysqlDB.GetKey()); err != nil {
-			cfg.DBName = mysqlDB.Spec.DBName
-			db, err := sql.Open(r.MySQLDriverName, cfg.FormatDSN())
-			if err != nil {
-				return true, err
-			}
-			err = db.PingContext(ctx)
-			if err != nil {
-				return true, err
-			}
-			r.MySQLClients[mysqlDB.GetKey()] = db
-			log.Info("Successfully added MySQL client", "mysqlDB.Name", mysqlDB.Name)
-		}
-	}
 	return false, nil
 }
 
-// If GcpSecretName is set, get password from GCP secret manager
-// Otherwise user MySQL.Spec.AdminPassword
 func (r *MySQLReconciler) getMySQLConfig(ctx context.Context, mysql *mysqlv1alpha1.MySQL) (Config, error) {
 	log := log.FromContext(ctx)
-	secretManager, ok := r.SecretManagers[mysql.Spec.AdminPassword.Type]
-	if !ok {
-		return Config{}, fmt.Errorf("the specified SecretManager type (%s) doesn't exist", mysql.Spec.AdminPassword.Type)
-	}
-	password, err := secretManager.GetSecret(ctx, mysql.Spec.AdminPassword.Name)
+
+	// Get credentials from Kubernetes secret referenced by authSecret
+	secret := &v1.Secret{}
+	authSecretName := mysql.Spec.AuthSecret
+
+	// Get the secret from the same namespace as the MySQL CR
+	err := r.Get(ctx, client.ObjectKey{Namespace: mysql.Namespace, Name: authSecretName}, secret)
 	if err != nil {
-		log.Error(err, "failed to get secret from secret manager", "secret", mysql.Spec.AdminPassword.Name)
-		return Config{}, err
-	}
-	secretManager, ok = r.SecretManagers[mysql.Spec.AdminUser.Type]
-	if !ok {
-		return Config{}, fmt.Errorf("the specified SecretManager type (%s) doesn't exist", mysql.Spec.AdminUser.Type)
-	}
-	user, err := secretManager.GetSecret(ctx, mysql.Spec.AdminUser.Name)
-	if err != nil {
+		log.Error(err, "failed to get kubernetes secret", "secret", authSecretName)
 		return Config{}, err
 	}
 
+	// Extract username and password from the secret
+	username, ok := secret.Data["username"]
+	if !ok {
+		return Config{}, fmt.Errorf("secret %s is missing username key", authSecretName)
+	}
+
+	password, ok := secret.Data["password"]
+	if !ok {
+		return Config{}, fmt.Errorf("secret %s is missing password key", authSecretName)
+	}
+
+	// Log success but not the actual credentials
+	log.Info("Successfully retrieved MySQL credentials", "secret", authSecretName)
+
 	return Config{
-		User:                 user,
-		Passwd:               password,
+		User:                 string(username),
+		Passwd:               string(password),
 		Addr:                 fmt.Sprintf("%s:%d", mysql.Spec.Host, mysql.Spec.Port),
 		Net:                  "tcp",
 		AllowNativePasswords: true,
@@ -250,7 +227,7 @@ func (r *MySQLReconciler) countReferencesByMySQLUser(ctx context.Context, mysql 
 	// 1. Get the referenced MySQLUser instances.
 	// 2. Return the number of referencing MySQLUser.
 	mysqlUserList := &mysqlv1alpha1.MySQLUserList{}
-	err := r.List(ctx, mysqlUserList, client.MatchingFields{"spec.mysqlName": mysql.Name})
+	err := r.List(ctx, mysqlUserList, client.MatchingFields{"spec.clusterName": mysql.Name})
 
 	if err != nil {
 		return 0, err
@@ -258,21 +235,11 @@ func (r *MySQLReconciler) countReferencesByMySQLUser(ctx context.Context, mysql 
 	return len(mysqlUserList.Items), nil
 }
 
-func (r *MySQLReconciler) countReferencesByMySQLDB(ctx context.Context, mysql *mysqlv1alpha1.MySQL) (int, error) {
-	mysqlDBList := &mysqlv1alpha1.MySQLDBList{}
-	err := r.List(ctx, mysqlDBList, client.MatchingFields{"spec.mysqlName": mysql.Name})
-
-	if err != nil {
-		return 0, err
-	}
-	return len(mysqlDBList.Items), nil
-}
-
-// finalizeMySQL return true if no user and no db is referencing the given MySQL
+// finalizeMySQL return true if no user is referencing the given MySQL
 func (r *MySQLReconciler) finalizeMySQL(ctx context.Context, mysql *mysqlv1alpha1.MySQL) bool {
 	log := log.FromContext(ctx).WithName("MySQLReconciler")
-	if mysql.Status.UserCount > 0 || mysql.Status.DBCount > 0 {
-		log.Info("there's referencing user or database", "UserCount", mysql.Status.UserCount, "DBCount", mysql.Status.DBCount)
+	if mysql.Status.UserCount > 0 {
+		log.Info("there's referencing user", "UserCount", mysql.Status.UserCount)
 		return false
 	}
 	if db, ok := r.MySQLClients[mysql.GetKey()]; ok {

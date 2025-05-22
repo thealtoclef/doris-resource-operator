@@ -24,7 +24,7 @@ rules:
 - apiGroups:
   - mysql.nakamasato.com
   resources:
-  - mysqldbs
+  - catalogs
   verbs:
   - create
   - delete
@@ -36,13 +36,39 @@ rules:
 - apiGroups:
   - mysql.nakamasato.com
   resources:
-  - mysqldbs/finalizers
+  - catalogs/finalizers
   verbs:
   - update
 - apiGroups:
   - mysql.nakamasato.com
   resources:
-  - mysqldbs/status
+  - catalogs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - globalvariables
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - globalvariables/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - globalvariables/status
   verbs:
   - get
   - patch
@@ -95,6 +121,58 @@ rules:
   - mysql.nakamasato.com
   resources:
   - mysqlusers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - storagevaults
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - storagevaults/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - storagevaults/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - workloadgroups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - workloadgroups/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mysql.nakamasato.com
+  resources:
+  - workloadgroups/status
   verbs:
   - get
   - patch
