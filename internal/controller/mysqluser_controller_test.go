@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
+	"github.com/nakamasato/mysql-operator/internal/constants"
 	. "github.com/nakamasato/mysql-operator/internal/mysql"
 )
 
@@ -74,7 +75,7 @@ var _ = Describe("MySQLUser controller", func() {
 				mysql = &mysqlv1alpha1.MySQL{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQL"},
 					ObjectMeta: metav1.ObjectMeta{Name: MySQLName, Namespace: Namespace},
-					Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AdminUser: mysqlv1alpha1.Secret{Name: "root", Type: "raw"}, AdminPassword: mysqlv1alpha1.Secret{Name: "password", Type: "raw"}},
+					Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AuthSecret: "mysql-auth"},
 				}
 				Expect(k8sClient.Create(ctx, mysql)).Should(Succeed())
 
@@ -82,7 +83,7 @@ var _ = Describe("MySQLUser controller", func() {
 				mysqlUser = &mysqlv1alpha1.MySQLUser{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLUser"},
 					ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: MySQLUserName},
-					Spec:       mysqlv1alpha1.MySQLUserSpec{MysqlName: MySQLName},
+					Spec:       mysqlv1alpha1.MySQLUserSpec{ClusterName: MySQLName},
 					Status:     mysqlv1alpha1.MySQLUserStatus{},
 				}
 				Expect(k8sClient.Create(ctx, mysqlUser)).Should(Succeed())
@@ -90,7 +91,7 @@ var _ = Describe("MySQLUser controller", func() {
 				// secret should be created
 				secret := &v1.Secret{}
 				Eventually(func() error {
-					return k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: getSecretName(MySQLName, MySQLUserName)}, secret)
+					return k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: mysqlUser.Spec.PasswordSecretRef.Name}, secret)
 				}).Should(Succeed())
 
 				// status.phase should be ready
@@ -100,7 +101,7 @@ var _ = Describe("MySQLUser controller", func() {
 						return ""
 					}
 					return mysqlUser.Status.Phase
-				}).Should(Equal(mysqlUserPhaseReady))
+				}).Should(Equal(constants.PhaseReady))
 
 				// status.reason should be 'both secret and mysql user are successfully created.'
 				Eventually(func() string {
@@ -109,7 +110,7 @@ var _ = Describe("MySQLUser controller", func() {
 						return ""
 					}
 					return mysqlUser.Status.Reason
-				}).Should(Equal(mysqlUserReasonCompleted))
+				}).Should(Equal(constants.ReasonCompleted))
 			})
 
 			It("Should have finalizer", func() {
@@ -117,14 +118,14 @@ var _ = Describe("MySQLUser controller", func() {
 				mysql = &mysqlv1alpha1.MySQL{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQL"},
 					ObjectMeta: metav1.ObjectMeta{Name: MySQLName, Namespace: Namespace},
-					Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AdminUser: mysqlv1alpha1.Secret{Name: "root", Type: "raw"}, AdminPassword: mysqlv1alpha1.Secret{Name: "password", Type: "raw"}},
+					Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AuthSecret: "mysql-auth"},
 				}
 				Expect(k8sClient.Create(ctx, mysql)).Should(Succeed())
 				By("By creating a new MySQLUser")
 				mysqlUser = &mysqlv1alpha1.MySQLUser{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLUser"},
 					ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: MySQLUserName},
-					Spec:       mysqlv1alpha1.MySQLUserSpec{MysqlName: MySQLName},
+					Spec:       mysqlv1alpha1.MySQLUserSpec{ClusterName: MySQLName},
 					Status:     mysqlv1alpha1.MySQLUserStatus{},
 				}
 				Expect(k8sClient.Create(ctx, mysqlUser)).Should(Succeed())
@@ -152,14 +153,14 @@ var _ = Describe("MySQLUser controller", func() {
 				mysql = &mysqlv1alpha1.MySQL{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQL"},
 					ObjectMeta: metav1.ObjectMeta{Name: MySQLName, Namespace: Namespace},
-					Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AdminUser: mysqlv1alpha1.Secret{Name: "root", Type: "raw"}, AdminPassword: mysqlv1alpha1.Secret{Name: "password", Type: "raw"}},
+					Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AuthSecret: "mysql-auth"},
 				}
 				Expect(k8sClient.Create(ctx, mysql)).Should(Succeed())
 
 				mysqlUser = &mysqlv1alpha1.MySQLUser{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLUser"},
 					ObjectMeta: metav1.ObjectMeta{Name: MySQLUserName, Namespace: Namespace},
-					Spec:       mysqlv1alpha1.MySQLUserSpec{MysqlName: MySQLName},
+					Spec:       mysqlv1alpha1.MySQLUserSpec{ClusterName: MySQLName},
 					Status:     mysqlv1alpha1.MySQLUserStatus{},
 				}
 				Expect(k8sClient.Create(ctx, mysqlUser)).Should(Succeed())
@@ -182,7 +183,7 @@ var _ = Describe("MySQLUser controller", func() {
 				mysqlUser = &mysqlv1alpha1.MySQLUser{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLUser"},
 					ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: MySQLUserName},
-					Spec:       mysqlv1alpha1.MySQLUserSpec{MysqlName: MySQLName},
+					Spec:       mysqlv1alpha1.MySQLUserSpec{ClusterName: MySQLName},
 					Status:     mysqlv1alpha1.MySQLUserStatus{},
 				}
 				Expect(k8sClient.Delete(ctx, mysqlUser)).To(Succeed())
@@ -194,7 +195,7 @@ var _ = Describe("MySQLUser controller", func() {
 				}).Should(BeTrue())
 
 				secret := &v1.Secret{}
-				secretName := getSecretName(MySQLName, MySQLUserName)
+				secretName := mysqlUser.Spec.PasswordSecretRef.Name
 				Eventually(func() bool {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: secretName}, secret)
 					return errors.IsNotFound(err) // Secret should not exist
@@ -245,7 +246,7 @@ var _ = Describe("MySQLUser controller", func() {
 			mysql = &mysqlv1alpha1.MySQL{
 				TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQL"},
 				ObjectMeta: metav1.ObjectMeta{Name: MySQLName, Namespace: Namespace},
-				Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AdminUser: mysqlv1alpha1.Secret{Name: "root", Type: "raw"}, AdminPassword: mysqlv1alpha1.Secret{Name: "password", Type: "raw"}},
+				Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AuthSecret: "mysql-auth"},
 			}
 			Expect(k8sClient.Create(ctx, mysql)).Should(Succeed())
 		})
@@ -294,7 +295,7 @@ var _ = Describe("MySQLUser controller", func() {
 				// Secret should not be created
 				secret := &v1.Secret{}
 				Consistently(func() bool {
-					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: getSecretName(MySQLName, MySQLUserName)}, secret)
+					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: mysqlUser.Spec.PasswordSecretRef.Name}, secret)
 					return errors.IsNotFound(err)
 				}).Should(BeTrue())
 			})
@@ -307,27 +308,27 @@ var _ = Describe("MySQLUser controller", func() {
 				// Secret should not be created
 				secret := &v1.Secret{}
 				Consistently(func() bool {
-					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: getSecretName(MySQLName, MySQLUserName)}, secret)
+					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: mysqlUser.Spec.PasswordSecretRef.Name}, secret)
 					return errors.IsNotFound(err)
 				}).Should(BeTrue())
 
-				// Status.Phase should be NotReady
+				// status.phase should be not ready
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Phase
-				}).Should(Equal(mysqlUserPhaseNotReady))
+				}).Should(Equal(constants.PhaseNotReady))
 
-				// Status.Reason should be 'failed to connect to mysql'
+				// status.reason should be 'Failed to fetch MySQL client'
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Reason
-				}).Should(Equal(mysqlUserReasonMySQLFailedToCreateUser))
+				}).Should(Equal(constants.ReasonMySQLFetchFailed))
 			})
 		})
 
@@ -351,7 +352,7 @@ var _ = Describe("MySQLUser controller", func() {
 				// Secret will not be created
 				secret := &v1.Secret{}
 				Consistently(func() bool {
-					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: getSecretName(MySQLName, MySQLUserName)}, secret)
+					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: mysqlUser.Spec.PasswordSecretRef.Name}, secret)
 					return errors.IsNotFound(err)
 				}).Should(BeTrue())
 
@@ -375,34 +376,222 @@ var _ = Describe("MySQLUser controller", func() {
 				mysqlUser = &mysqlv1alpha1.MySQLUser{
 					TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQLUser"},
 					ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: MySQLUserName},
-					Spec:       mysqlv1alpha1.MySQLUserSpec{MysqlName: MySQLName},
+					Spec:       mysqlv1alpha1.MySQLUserSpec{ClusterName: MySQLName},
 				}
 				Expect(k8sClient.Create(ctx, mysqlUser)).Should(Succeed())
 
 				// Secret will not be created
 				secret := &v1.Secret{}
 				Consistently(func() bool {
-					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: getSecretName(MySQLName, MySQLUserName)}, secret)
+					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: mysqlUser.Spec.PasswordSecretRef.Name}, secret)
 					return errors.IsNotFound(err)
 				}).Should(BeTrue())
 
-				// Status.Phase should be NotReady
+				// status.phase should be not ready
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Phase
-				}).Should(Equal(mysqlUserPhaseNotReady))
+				}).Should(Equal(constants.PhaseNotReady))
 
-				// Status.Reason should be 'failed to fetch MySQL'
+				// status.reason should be 'Failed to fetch MySQL client'
 				Eventually(func() string {
 					err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLUserName}, mysqlUser)
 					if err != nil {
 						return ""
 					}
 					return mysqlUser.Status.Reason
-				}).Should(Equal(mysqlUserReasonMySQLFetchFailed))
+				}).Should(Equal(constants.ReasonMySQLFetchFailed))
+			})
+		})
+	})
+
+	// Tests for calculateGrantDiff function
+	Context("When calculating grant differences", func() {
+		When("specific targets are removed", func() {
+			It("should properly revoke privileges", func() {
+				// Test scenario: User had privileges on multiple workload groups,
+				// but some are removed in the updated grants
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'normal'",
+					},
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'",
+					},
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'", // 'normal' workload group removed
+					},
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke USAGE_PRIV on 'normal' workload group
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("WORKLOAD GROUP 'normal'"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+
+				// No new grants should be added
+				Expect(grantsToAdd).To(BeEmpty())
+			})
+		})
+
+		When("privileges are changed", func() {
+			It("should properly revoke only the removed privileges", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV", "ALTER_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*", // ALTER_PRIV removed
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke only ALTER_PRIV
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("*.*.*"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"ALTER_PRIV"}))
+
+				// No new grants should be added
+				Expect(grantsToAdd).To(BeEmpty())
+			})
+		})
+
+		When("entire target type is removed", func() {
+			It("should properly revoke all privileges of that target type", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'normal'",
+					},
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*",
+					},
+					// No workload group privileges
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke USAGE_PRIV on 'normal' workload group
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("WORKLOAD GROUP 'normal'"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+
+				// No new grants should be added
+				Expect(grantsToAdd).To(BeEmpty())
+			})
+		})
+
+		When("new targets are added", func() {
+			It("should correctly add the new grants", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV"},
+						Target:     "*.*.*",
+					},
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'",
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Nothing should be revoked
+				Expect(grantsToRevoke).To(BeEmpty())
+
+				// New workload group privilege should be added
+				Expect(grantsToAdd).To(HaveLen(1))
+				Expect(grantsToAdd[0].Target).To(Equal("WORKLOAD GROUP 'high'"))
+				Expect(grantsToAdd[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+			})
+		})
+
+		When("both additions and revocations are needed", func() {
+			It("should handle both operations correctly", func() {
+				oldGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'normal'",
+					},
+					{
+						Privileges: []string{"SELECT_PRIV"},
+						Target:     "*.*.*",
+					},
+				}
+
+				newGrants := []mysqlv1alpha1.Grant{
+					{
+						Privileges: []string{"SELECT_PRIV", "LOAD_PRIV"},
+						Target:     "*.*.*", // Added LOAD_PRIV
+					},
+					{
+						Privileges: []string{"USAGE_PRIV"},
+						Target:     "WORKLOAD GROUP 'high'", // Changed from 'normal' to 'high'
+					},
+				}
+
+				grantsToRevoke, grantsToAdd := calculateGrantDiff(oldGrants, newGrants)
+
+				// Should revoke USAGE_PRIV on 'normal' workload group
+				Expect(grantsToRevoke).To(HaveLen(1))
+				Expect(grantsToRevoke[0].Target).To(Equal("WORKLOAD GROUP 'normal'"))
+				Expect(grantsToRevoke[0].Privileges).To(Equal([]string{"USAGE_PRIV"}))
+
+				// Should add LOAD_PRIV on *.*.* and USAGE_PRIV on 'high' workload group
+				Expect(grantsToAdd).To(HaveLen(2))
+
+				// Check if both expected grants are in grantsToAdd
+				foundTable := false
+				foundWorkload := false
+				for _, grant := range grantsToAdd {
+					if grant.Target == "*.*.*" {
+						Expect(grant.Privileges).To(Equal([]string{"LOAD_PRIV"}))
+						foundTable = true
+					} else if grant.Target == "WORKLOAD GROUP 'high'" {
+						Expect(grant.Privileges).To(Equal([]string{"USAGE_PRIV"}))
+						foundWorkload = true
+					}
+				}
+				Expect(foundTable && foundWorkload).To(BeTrue(), "Expected both table and workload group grants")
 			})
 		})
 	})

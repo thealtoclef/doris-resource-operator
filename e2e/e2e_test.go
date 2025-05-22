@@ -28,7 +28,6 @@ const (
 	mysqlNamespace     = "default"
 	mysqlUserFinalizer = "mysqluser.nakamasato.com/finalizer"
 	mysqlFinalizer     = "mysql.nakamasato.com/finalizer"
-	mysqlDBFinalizer   = "mysqldb.nakamasato.com/finalizer"
 	apiVersion         = "mysql.nakamasato.com/v1alphav1"
 	timeout            = 2 * time.Minute
 	interval           = 1 * time.Second
@@ -41,13 +40,11 @@ var _ = Describe("E2e", func() {
 	BeforeEach(func() {
 		deleteMySQLUserIfExist(ctx)
 		deleteMySQLIfExist(ctx)
-		deleteMySQLDBIfExist(ctx, mysqlDBName)
 	})
 
 	AfterEach(func() {
 		deleteMySQLUserIfExist(ctx)
 		deleteMySQLIfExist(ctx)
-		deleteMySQLDBIfExist(ctx, mysqlDBName)
 	})
 
 	Describe("Creating and deleting MySQL/MySQLUser/MySQLDB object", func() {
@@ -124,16 +121,6 @@ var _ = Describe("E2e", func() {
 				}, timeout, interval).Should(Equal(0))
 			})
 
-			It("Successfully Create MySQL database", func() {
-				By("Create MySQLDB")
-				mysqlDB := newMySQLDB(mysqlDBName, databaseName, mysqlName, mysqlNamespace)
-				Expect(k8sClient.Create(ctx, mysqlDB)).Should(Succeed())
-
-				Eventually(func() int {
-					res, _ := checkMySQLHasDatabase(databaseName)
-					return res
-				}, timeout, interval).Should(Equal(1))
-			})
 		})
 
 		Context("Without the MySQL cluster", func() {
@@ -272,29 +259,6 @@ func deleteMySQLUserIfExist(ctx context.Context) {
 	Expect(k8sClient.Delete(ctx, object)).Should(Succeed())
 }
 
-func deleteMySQLDBIfExist(ctx context.Context, name string) {
-	object, err := getMySQLDB(name, mysqlNamespace) // TODO: enable to pass mysqlDB and mysqlNamespace
-	if err != nil {
-		return
-	}
-
-	// remove finalizers
-	if controllerutil.ContainsFinalizer(object, mysqlDBFinalizer) {
-		controllerutil.RemoveFinalizer(object, mysqlDBFinalizer)
-		err := k8sClient.Update(ctx, object)
-		if err != nil {
-			return
-		}
-	}
-
-	// delete object if exist
-	object, err = getMySQLDB(name, mysqlNamespace) // TODO: enable to pass mysqlName and mysqlNamespace
-	if err != nil {
-		return
-	}
-	Expect(k8sClient.Delete(ctx, object)).Should(Succeed())
-}
-
 func getDeployment(name, namespace string) (*appsv1.Deployment, error) {
 	deploy := &appsv1.Deployment{}
 	err := k8sClient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: name}, deploy)
@@ -331,23 +295,13 @@ func getMySQLUser(name, namespace string) (*mysqlv1alpha1.MySQLUser, error) {
 	return object, nil
 }
 
-func getMySQLDB(name, namespace string) (*mysqlv1alpha1.MySQLDB, error) {
-	object := &mysqlv1alpha1.MySQLDB{}
-	err := k8sClient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: name}, object)
-	if err != nil {
-		return nil, err
-	}
-	return object, nil
-}
-
 func newMySQL(name, namespace string) *mysqlv1alpha1.MySQL {
 	return &mysqlv1alpha1.MySQL{
 		TypeMeta:   metav1.TypeMeta{APIVersion: apiVersion, Kind: "MySQL"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: mysqlv1alpha1.MySQLSpec{
-			Host:          "mysql.default",
-			AdminUser:     mysqlv1alpha1.Secret{Name: "root", Type: "raw"},
-			AdminPassword: mysqlv1alpha1.Secret{Name: "password", Type: "raw"},
+			Host:       "mysql.default",
+			AuthSecret: "mysql-auth-secret",
 		},
 	}
 }
@@ -357,16 +311,8 @@ func newMySQLUser(name, mysqlName, namespace string) *mysqlv1alpha1.MySQLUser {
 		TypeMeta:   metav1.TypeMeta{APIVersion: apiVersion, Kind: "MySQL"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: mysqlv1alpha1.MySQLUserSpec{
-			MysqlName: mysqlName,
+			ClusterName: mysqlName,
 		},
-	}
-}
-
-func newMySQLDB(name, dbName, mysqlName, namespace string) *mysqlv1alpha1.MySQLDB {
-	return &mysqlv1alpha1.MySQLDB{
-		TypeMeta:   metav1.TypeMeta{APIVersion: apiVersion, Kind: "MySQLDB"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       mysqlv1alpha1.MySQLDBSpec{DBName: dbName, MysqlName: mysqlName},
 	}
 }
 

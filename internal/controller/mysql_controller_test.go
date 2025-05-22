@@ -15,7 +15,6 @@ import (
 
 	mysqlv1alpha1 "github.com/nakamasato/mysql-operator/api/v1alpha1"
 	internalmysql "github.com/nakamasato/mysql-operator/internal/mysql"
-	"github.com/nakamasato/mysql-operator/internal/secret"
 )
 
 var _ = Describe("MySQL controller", func() {
@@ -30,18 +29,12 @@ var _ = Describe("MySQL controller", func() {
 		})
 		Expect(err).ToNot(HaveOccurred())
 
-		// set index for mysqluser with spec.mysqlName
+		// set index for mysqluser with spec.clusterName
 		cache := k8sManager.GetCache()
 		indexFunc := func(obj client.Object) []string {
-			return []string{obj.(*mysqlv1alpha1.MySQLUser).Spec.MysqlName}
+			return []string{obj.(*mysqlv1alpha1.MySQLUser).Spec.ClusterName}
 		}
-		if err := cache.IndexField(ctx, &mysqlv1alpha1.MySQLUser{}, "spec.mysqlName", indexFunc); err != nil {
-			panic(err)
-		}
-		indexFunc = func(obj client.Object) []string {
-			return []string{obj.(*mysqlv1alpha1.MySQLDB).Spec.MysqlName}
-		}
-		if err := cache.IndexField(ctx, &mysqlv1alpha1.MySQLDB{}, "spec.mysqlName", indexFunc); err != nil {
+		if err := cache.IndexField(ctx, &mysqlv1alpha1.MySQLUser{}, "spec.clusterName", indexFunc); err != nil {
 			panic(err)
 		}
 
@@ -51,12 +44,10 @@ var _ = Describe("MySQL controller", func() {
 			Scheme:          k8sManager.GetScheme(),
 			MySQLClients:    mySQLClients,
 			MySQLDriverName: "testdbdriver",
-			SecretManagers:  map[string]secret.SecretManager{"raw": secret.RawSecretManager{}},
 		}
 		err = ctrl.NewControllerManagedBy(k8sManager).
 			For(&mysqlv1alpha1.MySQL{}).
 			Owns(&mysqlv1alpha1.MySQLUser{}).
-			Owns(&mysqlv1alpha1.MySQLDB{}).
 			Named(fmt.Sprintf("mysql-test-%d", time.Now().UnixNano())).
 			Complete(reconciler)
 		Expect(err).ToNot(HaveOccurred())
@@ -78,20 +69,18 @@ var _ = Describe("MySQL controller", func() {
 	Context("With available MySQL", func() {
 		BeforeEach(func() {
 			cleanUpMySQLUser(ctx, k8sClient, Namespace)
-			cleanUpMySQLDB(ctx, k8sClient, Namespace)
 			cleanUpMySQL(ctx, k8sClient, Namespace)
 
 			// Create MySQL
 			mysql = &mysqlv1alpha1.MySQL{
 				TypeMeta:   metav1.TypeMeta{APIVersion: APIVersion, Kind: "MySQL"},
 				ObjectMeta: metav1.ObjectMeta{Name: MySQLName, Namespace: Namespace},
-				Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AdminUser: mysqlv1alpha1.Secret{Name: "root", Type: "raw"}, AdminPassword: mysqlv1alpha1.Secret{Name: "password", Type: "raw"}},
+				Spec:       mysqlv1alpha1.MySQLSpec{Host: "nonexistinghost", AuthSecret: "mysql-auth"},
 			}
 			Expect(k8sClient.Create(ctx, mysql)).Should(Succeed())
 		})
 		AfterEach(func() {
 			cleanUpMySQLUser(ctx, k8sClient, Namespace)
-			cleanUpMySQLDB(ctx, k8sClient, Namespace)
 			cleanUpMySQL(ctx, k8sClient, Namespace)
 		})
 		It("Should have status.UserCount=0", func() {
@@ -136,15 +125,6 @@ var _ = Describe("MySQL controller", func() {
 			checkMySQLUserCount(ctx, int32(0))
 		})
 
-		It("Should increase status.DBCount by one", func() {
-			By("By creating a new MySQLDB")
-			mysqlDB = newMySQLDB(APIVersion, Namespace, MySQLDBName, DatabaseName, MySQLName)
-			Expect(controllerutil.SetOwnerReference(mysql, mysqlDB, scheme)).Should(Succeed())
-			Expect(k8sClient.Create(ctx, mysqlDB)).Should(Succeed())
-
-			checkMySQLDBCount(ctx, int32(1))
-		})
-
 		It("Should have finalizer", func() {
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: MySQLName}, mysql)
@@ -153,19 +133,6 @@ var _ = Describe("MySQL controller", func() {
 				}
 				return controllerutil.ContainsFinalizer(mysql, mysqlFinalizer)
 			}).Should(BeTrue())
-		})
-
-		It("Should have MySQL client for database", func() {
-			By("By creating a new MySQLDB")
-			mysqlDB = newMySQLDB(APIVersion, Namespace, MySQLDBName, DatabaseName, MySQLName)
-			Expect(controllerutil.SetOwnerReference(mysql, mysqlDB, scheme)).Should(Succeed())
-			Expect(k8sClient.Create(ctx, mysqlDB)).Should(Succeed())
-
-			By("Wait until MySQLDB gets ready")
-			mysqlDB.Status.Phase = "Ready"
-			Expect(k8sClient.Status().Update(ctx, mysqlDB)).Should(Succeed())
-
-			Eventually(func() int { return len(mySQLClients) }).Should(Equal(2))
 		})
 
 		It("Should update MySQLClient", func() {
@@ -200,14 +167,4 @@ func checkMySQLUserCount(ctx context.Context, expectedUserCount int32) {
 		}
 		return mysql.Status.UserCount
 	}).Should(Equal(expectedUserCount))
-}
-
-func checkMySQLDBCount(ctx context.Context, expectedDBCount int32) {
-	Eventually(func() int32 {
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: MySQLName, Namespace: Namespace}, mysql)
-		if err != nil {
-			return -1
-		}
-		return mysql.Status.DBCount
-	}).Should(Equal(expectedDBCount))
 }

@@ -1,0 +1,181 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: storagevaults.mysql.nakamasato.com
+spec:
+  group: mysql.nakamasato.com
+  names:
+    kind: StorageVault
+    listKind: StorageVaultList
+    plural: storagevaults
+    singular: storagevault
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.name
+      name: Name
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.storageVaultCreated
+      name: Created
+      type: boolean
+    - jsonPath: .status.isDefault
+      name: Default
+      type: boolean
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: StorageVault is the Schema for the storagevaults API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: StorageVaultSpec defines the desired state of StorageVault
+            properties:
+              clusterName:
+                description: Cluster name to reference to, which decides the destination
+                type: string
+                x-kubernetes-validations:
+                - message: Cluster name is immutable
+                  rule: self == oldSelf
+              isDefault:
+                default: false
+                description: |-
+                  IsDefault indicates whether this vault should be set as the default storage vault
+                  Only one storage vault can be the default in a Doris cluster at any time.
+                type: boolean
+              name:
+                description: |-
+                  Name of the storage vault
+                  This field is mutable to allow renaming the storage vault
+                maxLength: 64
+                pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
+                type: string
+              s3Properties:
+                description: S3Properties contains configuration for S3 vault type
+                properties:
+                  authSecret:
+                    description: |-
+                      AuthSecret is the name of the Kubernetes secret containing access_key and secret_key
+                      This field is mutable to allow credential rotation
+                    type: string
+                  bucket:
+                    description: Bucket is the S3 bucket name (StorageAccount for
+                      Azure)
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Bucket is immutable
+                      rule: self == oldSelf
+                  endpoint:
+                    description: Endpoint is the S3 endpoint
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Endpoint is immutable
+                      rule: self == oldSelf
+                  provider:
+                    description: Provider is the cloud vendor which provides the object
+                      storage service
+                    enum:
+                    - S3
+                    - OSS
+                    - COS
+                    - OBS
+                    - BOS
+                    - AZURE
+                    - GCP
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Provider is immutable
+                      rule: self == oldSelf
+                  region:
+                    description: Region is the S3 region
+                    type: string
+                    x-kubernetes-validations:
+                    - message: Region is immutable
+                      rule: self == oldSelf
+                  rootPath:
+                    description: RootPath is the path where the data would be stored
+                    type: string
+                    x-kubernetes-validations:
+                    - message: RootPath is immutable
+                      rule: self == oldSelf
+                  usePathStyle:
+                    default: true
+                    description: |-
+                      UsePathStyle indicates using path-style URL (true) or virtual-hosted-style URL (false)
+                      This field is mutable to allow changing the URL style
+                    type: boolean
+                required:
+                - authSecret
+                - bucket
+                - endpoint
+                - provider
+                - region
+                - rootPath
+                type: object
+              type:
+                description: Type of storage vault
+                enum:
+                - S3
+                - HDFS
+                type: string
+                x-kubernetes-validations:
+                - message: Type is immutable
+                  rule: self == oldSelf
+            required:
+            - clusterName
+            - name
+            - type
+            type: object
+            x-kubernetes-validations:
+            - message: S3Properties must be provided when Type is S3
+              rule: self.type != 'S3' || has(self.s3Properties)
+          status:
+            description: StorageVaultStatus defines the observed state of StorageVault
+            properties:
+              isDefault:
+                description: IsDefault indicates whether this vault is set as the
+                  default storage vault
+                type: boolean
+              phase:
+                description: Phase represents the current phase of the storage vault
+                type: string
+              reason:
+                description: Reason provides more information about the current phase
+                type: string
+              storageVaultCreated:
+                description: StorageVaultCreated indicates whether the storage vault
+                  has been created in Doris
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

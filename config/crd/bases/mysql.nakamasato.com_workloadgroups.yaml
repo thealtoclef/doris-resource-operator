@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: mysqls.mysql.nakamasato.com
+  name: workloadgroups.mysql.nakamasato.com
 spec:
   group: mysql.nakamasato.com
   names:
-    kind: MySQL
-    listKind: MySQLList
-    plural: mysqls
-    singular: mysql
+    kind: WorkloadGroup
+    listKind: WorkloadGroupList
+    plural: workloadgroups
+    singular: workloadgroup
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -27,22 +27,13 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    - jsonPath: .status.connected
-      name: Connected
+    - jsonPath: .status.workloadGroupCreated
+      name: Created
       type: boolean
-    - jsonPath: .spec.host
-      name: Host
-      type: string
-    - jsonPath: .spec.authSecret
-      name: AuthSecret
-      type: string
-    - jsonPath: .status.userCount
-      name: UserCount
-      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: MySQL is the Schema for the mysqls API
+        description: WorkloadGroup is the Schema for the workloadgroups API
         properties:
           apiVersion:
             description: |-
@@ -62,41 +53,45 @@ spec:
           metadata:
             type: object
           spec:
-            description: MySQLSpec holds the connection information for the target
-              MySQL cluster.
+            description: WorkloadGroupSpec defines the desired state of WorkloadGroup
             properties:
-              authSecret:
-                description: |-
-                  AuthSecret is a reference to a kubernetes basic auth secret containing
-                  username and password keys for authenticating to the client.
+              clusterName:
+                description: Cluster name to reference to, which decides the destination
                 type: string
-              host:
-                description: Host is MySQL host of target MySQL cluster.
+                x-kubernetes-validations:
+                - message: Cluster name is immutable
+                  rule: self == oldSelf
+              name:
+                description: Name of the workload group
+                maxLength: 64
+                pattern: ^[a-zA-Z][a-zA-Z0-9_\-]*$
                 type: string
-              port:
-                default: 3306
-                description: Port is MySQL port of target MySQL cluster.
-                type: integer
+                x-kubernetes-validations:
+                - message: Workload group name is immutable
+                  rule: self == oldSelf
+              properties:
+                additionalProperties:
+                  type: string
+                description: Properties defines the direct key-value properties for
+                  the workload group
+                type: object
             required:
-            - authSecret
-            - host
+            - clusterName
+            - name
             type: object
           status:
-            description: MySQLStatus defines the observed state of MySQL
+            description: WorkloadGroupStatus defines the observed state of WorkloadGroup
             properties:
-              connected:
-                description: true if successfully connected to the MySQL cluster
-                type: boolean
-              reason:
-                description: Reason for connection failure
+              phase:
+                description: Phase represents the current phase of the workload group
                 type: string
-              userCount:
-                default: 0
-                description: The number of users in this MySQL
-                format: int32
-                type: integer
-            required:
-            - userCount
+              reason:
+                description: Reason provides more information about the current phase
+                type: string
+              workloadGroupCreated:
+                description: WorkloadGroupCreated indicates whether the workload group
+                  has been created in Doris
+                type: boolean
             type: object
         type: object
     served: true

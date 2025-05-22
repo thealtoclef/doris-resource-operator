@@ -2,5 +2,4 @@
 resources:
 - mysql_v1alpha1_mysqluser.yaml
 - mysql_v1alpha1_mysql.yaml
-- mysql_v1alpha1_mysqldb.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
