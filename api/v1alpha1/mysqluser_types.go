@@ -69,6 +69,13 @@ type MySQLUserSpec struct {
 
 	// Grants of database user
 	Grants []Grant `json:"grants,omitempty"`
+
+	// +kubebuilder:default=true
+	// Whether to manage properties for this user. If false, the operator will not manage any properties.
+	ManageProperties bool `json:"manageProperties,omitempty"`
+
+	// Properties of database user (key-value pairs for SET PROPERTY commands)
+	Properties map[string]string `json:"properties,omitempty"`
 }
 
 // MySQLUserStatus defines the observed state of MySQLUser

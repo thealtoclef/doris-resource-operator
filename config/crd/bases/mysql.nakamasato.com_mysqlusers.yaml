@@ -93,6 +93,11 @@ spec:
                 description: Whether to manage grants for this user. If false, the
                   operator will not manage any grants.
                 type: boolean
+              manageProperties:
+                default: true
+                description: Whether to manage properties for this user. If false,
+                  the operator will not manage any properties.
+                type: boolean
               passwordSecretRef:
                 description: Secret to reference to, which contains the password
                 properties:
@@ -103,6 +108,12 @@ spec:
                 required:
                 - key
                 - name
+                type: object
+              properties:
+                additionalProperties:
+                  type: string
+                description: Properties of database user (key-value pairs for SET
+                  PROPERTY commands)
                 type: object
               username:
                 description: Username

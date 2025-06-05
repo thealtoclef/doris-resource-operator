@@ -84,6 +84,7 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	userIdentity := mysqlUser.GetUserIdentity()
 	passwordSecretRef := mysqlUser.Spec.PasswordSecretRef
 	grants := mysqlUser.Spec.Grants
+	properties := mysqlUser.Spec.Properties
 
 	// Fetch MySQL
 	mysql := &mysqlv1alpha1.MySQL{}
@@ -231,6 +232,22 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 	}
+
+	// Update Properties
+	if mysqlUser.Spec.ManageProperties {
+		err = r.updateProperties(ctx, mysqlClient, mysqlUser.Spec.Username, properties)
+		if err != nil {
+			log.Error(err, "[MySQL] Failed to update Properties", "clusterName", clusterName, "username", mysqlUser.Spec.Username)
+			mysqlUser.Status.Phase = constants.PhaseNotReady
+			mysqlUser.Status.Reason = constants.ReasonMySQLFailedToSetProperty
+			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
+				log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
+				return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
+			}
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Update status
 	mysqlUser.Status.Phase = constants.PhaseReady
 	mysqlUser.Status.Reason = constants.ReasonCompleted
@@ -822,5 +839,87 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 		log.Info("User privileges granted successfully")
 	}
 
+	return nil
+}
+
+// fetchProperties retrieves the current properties for a user using SHOW PROPERTY
+func (r *MySQLUserReconciler) fetchProperties(ctx context.Context, mysqlClient *sql.DB, username string) (map[string]string, error) {
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("username", username)
+
+	properties := make(map[string]string)
+
+	// Execute SHOW PROPERTY FOR '<username>' to get current properties
+	query := fmt.Sprintf("SHOW PROPERTY FOR '%s'", username)
+	rows, err := mysqlClient.QueryContext(ctx, query)
+	if err != nil {
+		log.Error(err, "Failed to execute SHOW PROPERTY query")
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Process the results
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			log.Error(err, "Failed to scan property row")
+			return nil, err
+		}
+		properties[key] = value
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Error(err, "Error iterating over property rows")
+		return nil, err
+	}
+
+	return properties, nil
+}
+
+// setProperty sets a single property for a user using SET PROPERTY
+func (r *MySQLUserReconciler) setProperty(ctx context.Context, mysqlClient *sql.DB, username, key, value string) error {
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("username", username, "key", key, "value", value)
+
+	// Execute SET PROPERTY FOR '<username>' '<key>' = '<value>'
+	query := fmt.Sprintf("SET PROPERTY FOR '%s' '%s' = '%s'", username, key, value)
+	_, err := mysqlClient.ExecContext(ctx, query)
+	if err != nil {
+		log.Error(err, "Failed to execute SET PROPERTY query")
+		return err
+	}
+
+	log.Info("Property set successfully")
+	return nil
+}
+
+// updateProperties manages user properties by comparing desired vs current state
+func (r *MySQLUserReconciler) updateProperties(ctx context.Context, mysqlClient *sql.DB, username string, desiredProperties map[string]string) error {
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("username", username)
+
+	if len(desiredProperties) == 0 {
+		log.Info("No properties to manage")
+		return nil
+	}
+
+	// Fetch current properties
+	currentProperties, err := r.fetchProperties(ctx, mysqlClient, username)
+	if err != nil {
+		log.Error(err, "Failed to fetch current properties")
+		return err
+	}
+
+	// Calculate differences and update properties that have changed
+	for key, desiredValue := range desiredProperties {
+		if currentValue, exists := currentProperties[key]; !exists || currentValue != desiredValue {
+			log.Info("Property needs update", "key", key, "currentValue", currentValue, "desiredValue", desiredValue)
+			if err := r.setProperty(ctx, mysqlClient, username, key, desiredValue); err != nil {
+				log.Error(err, "Failed to set property", "key", key, "value", desiredValue)
+				return err
+			}
+		} else {
+			log.V(1).Info("Property already has desired value", "key", key, "value", desiredValue)
+		}
+	}
+
+	log.Info("Properties updated successfully")
 	return nil
 }
