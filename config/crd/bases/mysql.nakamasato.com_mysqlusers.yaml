@@ -93,6 +93,11 @@ spec:
                 description: Whether to manage grants for this user. If false, the
                   operator will not manage any grants.
                 type: boolean
+              manageProperties:
+                default: true
+                description: Whether to manage properties for this user. If false,
+                  the operator will not manage any properties.
+                type: boolean
               passwordSecretRef:
                 description: Secret to reference to, which contains the password
                 properties:
@@ -104,6 +109,23 @@ spec:
                 - key
                 - name
                 type: object
+              properties:
+                description: Properties of database user (list of name-value pairs
+                  for SET PROPERTY commands)
+                items:
+                  description: Property defines a single property for a MySQL user
+                  properties:
+                    name:
+                      description: Name of the property
+                      type: string
+                    value:
+                      description: Value of the property
+                      type: string
+                  required:
+                  - name
+                  - value
+                  type: object
+                type: array
               username:
                 description: Username
                 maxLength: 64

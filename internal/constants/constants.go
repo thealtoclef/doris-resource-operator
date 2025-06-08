@@ -64,6 +64,7 @@ const (
 	ReasonMySQLFailedToCreateUser     = "Failed to create user"
 	ReasonMySQLFailedToUpdatePassword = "Failed to update password"
 	ReasonMySQLFailedToGrant          = "Failed to grant"
+	ReasonMySQLFailedToSetProperty    = "Failed to set property"
 
 	// Catalog-specific reason constants
 	ReasonFailedToFetchCatalog  = "Failed to fetch catalog"

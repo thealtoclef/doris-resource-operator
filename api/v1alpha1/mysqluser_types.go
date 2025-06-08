@@ -37,6 +37,17 @@ type Grant struct {
 	Target string `json:"target"`
 }
 
+// Property defines a single property for a MySQL user
+type Property struct {
+	// +kubebuilder:validation:Required
+	// Name of the property
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:Required
+	// Value of the property
+	Value string `json:"value"`
+}
+
 // MySQLUserSpec defines the desired state of MySQLUser
 type MySQLUserSpec struct {
 
@@ -69,6 +80,13 @@ type MySQLUserSpec struct {
 
 	// Grants of database user
 	Grants []Grant `json:"grants,omitempty"`
+
+	// +kubebuilder:default=true
+	// Whether to manage properties for this user. If false, the operator will not manage any properties.
+	ManageProperties bool `json:"manageProperties,omitempty"`
+
+	// Properties of database user (list of name-value pairs for SET PROPERTY commands)
+	Properties []Property `json:"properties,omitempty"`
 }
 
 // MySQLUserStatus defines the observed state of MySQLUser

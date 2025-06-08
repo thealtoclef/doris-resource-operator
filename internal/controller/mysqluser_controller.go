@@ -48,6 +48,10 @@ const (
 	mysqlUserFinalizer = "mysqluser.nakamasato.com/finalizer"
 )
 
+// PropertyDefaultValues defines the fallback sequence for setting default property values
+// When a property is not defined, we try these values in order: ” -> '-1' -> 'normal' -> '100'
+var PropertyDefaultValues = []string{"", "-1", "normal", "100"}
+
 // MySQLUserReconciler reconciles a MySQLUser object
 type MySQLUserReconciler struct {
 	client.Client
@@ -84,6 +88,7 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	userIdentity := mysqlUser.GetUserIdentity()
 	passwordSecretRef := mysqlUser.Spec.PasswordSecretRef
 	grants := mysqlUser.Spec.Grants
+	properties := mysqlUser.Spec.Properties
 
 	// Fetch MySQL
 	mysql := &mysqlv1alpha1.MySQL{}
@@ -231,6 +236,22 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 	}
+
+	// Update Properties
+	if mysqlUser.Spec.ManageProperties {
+		err = r.updateProperties(ctx, mysqlClient, mysqlUser.Spec.Username, properties)
+		if err != nil {
+			log.Error(err, "[MySQL] Failed to update Properties", "clusterName", clusterName, "username", mysqlUser.Spec.Username)
+			mysqlUser.Status.Phase = constants.PhaseNotReady
+			mysqlUser.Status.Reason = constants.ReasonMySQLFailedToSetProperty
+			if serr := r.Status().Update(ctx, mysqlUser); serr != nil {
+				log.Error(serr, "Failed to update MySQLUser status", "mysqlUser", mysqlUser.Name)
+				return ctrl.Result{RequeueAfter: time.Second}, nil // requeue after 1 second
+			}
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Update status
 	mysqlUser.Status.Phase = constants.PhaseReady
 	mysqlUser.Status.Reason = constants.ReasonCompleted
@@ -822,5 +843,140 @@ func (r *MySQLUserReconciler) updateGrants(ctx context.Context, mysqlClient *sql
 		log.Info("User privileges granted successfully")
 	}
 
+	return nil
+}
+
+// fetchProperties retrieves the current properties for a user using SHOW PROPERTY
+func (r *MySQLUserReconciler) fetchProperties(ctx context.Context, mysqlClient *sql.DB, username string) (map[string]string, error) {
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("username", username)
+
+	properties := make(map[string]string)
+
+	// Execute SHOW PROPERTY FOR '<username>' to get current properties
+	query := fmt.Sprintf("SHOW PROPERTY FOR '%s'", username)
+	rows, err := mysqlClient.QueryContext(ctx, query)
+	if err != nil {
+		log.Error(err, "Failed to execute SHOW PROPERTY query")
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Process the results
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			log.Error(err, "Failed to scan property row")
+			return nil, err
+		}
+		properties[key] = value
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Error(err, "Error iterating over property rows")
+		return nil, err
+	}
+
+	return properties, nil
+}
+
+// setProperty sets a single property for a user using SET PROPERTY
+func (r *MySQLUserReconciler) setProperty(ctx context.Context, mysqlClient *sql.DB, username, key, value string) error {
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("username", username, "key", key, "value", value)
+
+	// Execute SET PROPERTY FOR '<username>' '<key>' = '<value>'
+	query := fmt.Sprintf("SET PROPERTY FOR '%s' '%s' = '%s'", username, key, value)
+	_, err := mysqlClient.ExecContext(ctx, query)
+	if err != nil {
+		log.Error(err, "Failed to execute SET PROPERTY query")
+		return err
+	}
+
+	log.Info("Property set successfully")
+	return nil
+}
+
+// isDefaultValue checks if a value is one of the acceptable default values
+func (r *MySQLUserReconciler) isDefaultValue(value string) bool {
+	for _, defaultVal := range PropertyDefaultValues {
+		if value == defaultVal {
+			return true
+		}
+	}
+	return false
+}
+
+// setPropertyWithDefaults attempts to set a property value, trying default values if the desired value fails
+func (r *MySQLUserReconciler) setPropertyWithDefaults(ctx context.Context, mysqlClient *sql.DB, username, key, desiredValue string) error {
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("username", username, "key", key)
+
+	// First try the desired value
+	if err := r.setProperty(ctx, mysqlClient, username, key, desiredValue); err == nil {
+		log.Info("Property set with desired value", "value", desiredValue)
+		return nil
+	} else {
+		log.Info("Failed to set desired value, trying defaults", "desiredValue", desiredValue, "error", err.Error())
+	}
+
+	// If desired value fails, try default values in order
+	// Note: Failures to set individual default values are expected behavior and not considered errors
+	for _, defaultValue := range PropertyDefaultValues {
+		if err := r.setProperty(ctx, mysqlClient, username, key, defaultValue); err == nil {
+			log.Info("Property set with default value", "value", defaultValue)
+			return nil
+		}
+	}
+
+	// If all attempts failed, return the last error
+	return fmt.Errorf("failed to set property '%s' with desired value '%s' and all default values", key, desiredValue)
+}
+
+// updateProperties manages user properties by comparing desired vs current state
+func (r *MySQLUserReconciler) updateProperties(ctx context.Context, mysqlClient *sql.DB, username string, desiredProperties []mysqlv1alpha1.Property) error {
+	log := log.FromContext(ctx).WithName("MySQLUserReconciler").WithValues("username", username)
+
+	// Fetch current properties
+	currentProperties, err := r.fetchProperties(ctx, mysqlClient, username)
+	if err != nil {
+		log.Error(err, "Failed to fetch current properties")
+		return err
+	}
+
+	// Create a map of desired properties for easier lookup
+	desiredPropsMap := make(map[string]string)
+	for _, prop := range desiredProperties {
+		desiredPropsMap[prop.Name] = prop.Value
+	}
+
+	// Update properties that are defined in the spec and have changed
+	for _, prop := range desiredProperties {
+		if currentValue, exists := currentProperties[prop.Name]; !exists || currentValue != prop.Value {
+			log.Info("Property needs update", "key", prop.Name, "currentValue", currentValue, "desiredValue", prop.Value)
+			if err := r.setPropertyWithDefaults(ctx, mysqlClient, username, prop.Name, prop.Value); err != nil {
+				log.Error(err, "Failed to set property", "key", prop.Name, "value", prop.Value)
+				return err
+			}
+		} else {
+			log.V(1).Info("Property already has desired value", "key", prop.Name, "value", prop.Value)
+		}
+	}
+
+	// Handle unmanaged properties (present in DB but not defined in spec)
+	for currentPropName, currentValue := range currentProperties {
+		if _, isDefined := desiredPropsMap[currentPropName]; !isDefined {
+			// Check if current value is already one of the acceptable default values
+			if r.isDefaultValue(currentValue) {
+				log.V(1).Info("Unmanaged property already has acceptable default value", "key", currentPropName, "value", currentValue)
+				// Do nothing - leave it as is
+			} else {
+				log.Info("Unmanaged property has non-default value, resetting to default", "key", currentPropName, "currentValue", currentValue)
+				if err := r.setPropertyWithDefaults(ctx, mysqlClient, username, currentPropName, ""); err != nil {
+					log.Error(err, "Failed to reset unmanaged property to default", "key", currentPropName)
+					return err
+				}
+			}
+		}
+	}
+
+	log.Info("Properties updated successfully")
 	return nil
 }
