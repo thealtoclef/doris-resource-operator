@@ -74,19 +74,14 @@ type MySQLUserSpec struct {
 	// Secret to reference to, which contains the password
 	PasswordSecretRef SecretRef `json:"passwordSecretRef"`
 
-	// +kubebuilder:default=true
-	// Whether to manage grants for this user. If false, the operator will not manage any grants.
-	ManageGrants bool `json:"manageGrants,omitempty"`
+	// Grants of database user. If specified (even if empty), grants will be managed.
+	// If not specified, grants will not be managed by the operator.
+	Grants *[]Grant `json:"grants,omitempty"`
 
-	// Grants of database user
-	Grants []Grant `json:"grants,omitempty"`
-
-	// +kubebuilder:default=true
-	// Whether to manage properties for this user. If false, the operator will not manage any properties.
-	ManageProperties bool `json:"manageProperties,omitempty"`
-
-	// Properties of database user (list of name-value pairs for SET PROPERTY commands)
-	Properties []Property `json:"properties,omitempty"`
+	// Properties of database user (list of name-value pairs for SET PROPERTY commands).
+	// If specified (even if empty), properties will be managed.
+	// If not specified, properties will not be managed by the operator.
+	Properties *[]Property `json:"properties,omitempty"`
 }
 
 // MySQLUserStatus defines the observed state of MySQLUser

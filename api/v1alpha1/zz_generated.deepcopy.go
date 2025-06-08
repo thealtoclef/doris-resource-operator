@@ -384,15 +384,23 @@ func (in *MySQLUserSpec) DeepCopyInto(out *MySQLUserSpec) {
 	out.PasswordSecretRef = in.PasswordSecretRef
 	if in.Grants != nil {
 		in, out := &in.Grants, &out.Grants
-		*out = make([]Grant, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
+		*out = new([]Grant)
+		if **in != nil {
+			in, out := *in, *out
+			*out = make([]Grant, len(*in))
+			for i := range *in {
+				(*in)[i].DeepCopyInto(&(*out)[i])
+			}
 		}
 	}
 	if in.Properties != nil {
 		in, out := &in.Properties, &out.Properties
-		*out = make([]Property, len(*in))
-		copy(*out, *in)
+		*out = new([]Property)
+		if **in != nil {
+			in, out := *in, *out
+			*out = make([]Property, len(*in))
+			copy(*out, *in)
+		}
 	}
 }
 

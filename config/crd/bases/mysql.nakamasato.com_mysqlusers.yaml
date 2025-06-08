@@ -62,7 +62,9 @@ spec:
                 - message: Cluster name is immutable
                   rule: self == oldSelf
               grants:
-                description: Grants of database user
+                description: |-
+                  Grants of database user. If specified (even if empty), grants will be managed.
+                  If not specified, grants will not be managed by the operator.
                 items:
                   description: Grant defines the privileges and the resource for a
                     MySQL user
@@ -88,16 +90,6 @@ spec:
                 x-kubernetes-validations:
                 - message: Host is immutable
                   rule: self == oldSelf
-              manageGrants:
-                default: true
-                description: Whether to manage grants for this user. If false, the
-                  operator will not manage any grants.
-                type: boolean
-              manageProperties:
-                default: true
-                description: Whether to manage properties for this user. If false,
-                  the operator will not manage any properties.
-                type: boolean
               passwordSecretRef:
                 description: Secret to reference to, which contains the password
                 properties:
@@ -110,8 +102,10 @@ spec:
                 - name
                 type: object
               properties:
-                description: Properties of database user (list of name-value pairs
-                  for SET PROPERTY commands)
+                description: |-
+                  Properties of database user (list of name-value pairs for SET PROPERTY commands).
+                  If specified (even if empty), properties will be managed.
+                  If not specified, properties will not be managed by the operator.
                 items:
                   description: Property defines a single property for a MySQL user
                   properties:

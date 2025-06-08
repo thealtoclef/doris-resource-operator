@@ -87,8 +87,6 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	clusterName := mysqlUser.Spec.ClusterName
 	userIdentity := mysqlUser.GetUserIdentity()
 	passwordSecretRef := mysqlUser.Spec.PasswordSecretRef
-	grants := mysqlUser.Spec.Grants
-	properties := mysqlUser.Spec.Properties
 
 	// Fetch MySQL
 	mysql := &mysqlv1alpha1.MySQL{}
@@ -222,8 +220,9 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Info("[MySQL] Updated password of User", "clusterName", clusterName, "userIdentity", userIdentity)
 	}
 
-	// Update Grants
-	if mysqlUser.Spec.ManageGrants {
+	// Update Grants - only if grants field is provided (even if empty)
+	if mysqlUser.Spec.Grants != nil {
+		grants := *mysqlUser.Spec.Grants
 		err = r.updateGrants(ctx, mysqlClient, userIdentity, grants)
 		if err != nil {
 			log.Error(err, "[MySQL] Failed to update Grants", "clusterName", clusterName, "userIdentity", userIdentity)
@@ -237,8 +236,9 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Update Properties
-	if mysqlUser.Spec.ManageProperties {
+	// Update Properties - only if properties field is provided (even if empty)
+	if mysqlUser.Spec.Properties != nil {
+		properties := *mysqlUser.Spec.Properties
 		err = r.updateProperties(ctx, mysqlClient, mysqlUser.Spec.Username, properties)
 		if err != nil {
 			log.Error(err, "[MySQL] Failed to update Properties", "clusterName", clusterName, "username", mysqlUser.Spec.Username)
@@ -273,18 +273,6 @@ func (r *MySQLUserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // finalizeMySQLUser drops MySQL user
 func (r *MySQLUserReconciler) finalizeMySQLUser(ctx context.Context, mysqlClient *sql.DB, mysqlUser *mysqlv1alpha1.MySQLUser) error {
 	if mysqlUser.Status.UserCreated {
-		// Only revoke grants if ManageGrants is true
-		if mysqlUser.Spec.ManageGrants {
-			// Get existing grants
-			existingGrants, err := r.fetchGrants(ctx, mysqlClient, mysqlUser.GetUserIdentity())
-			if err != nil {
-				return err
-			}
-			// Revoke all existing grants
-			if err := r.revokePrivileges(ctx, mysqlClient, mysqlUser.GetUserIdentity(), existingGrants); err != nil {
-				return err
-			}
-		}
 		// Drop the user
 		_, err := mysqlClient.ExecContext(ctx, fmt.Sprintf("DROP USER IF EXISTS '%s'@'%s'", mysqlUser.Spec.Username, mysqlUser.Spec.Host))
 		if err != nil {
