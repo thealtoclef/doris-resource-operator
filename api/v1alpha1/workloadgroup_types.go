@@ -27,7 +27,7 @@ type WorkloadGroupSpec struct {
 	// Cluster name to reference to, which decides the destination
 	ClusterName string `json:"clusterName"`
 
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z][a-zA-Z0-9_\-]*$`
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z][a-zA-Z0-9-_]*$`
 	// +kubebuilder:validation:MaxLength=64
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Workload group name is immutable"
 	// Name of the workload group

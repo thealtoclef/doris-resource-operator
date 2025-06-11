@@ -75,7 +75,7 @@ spec:
                   Name of the storage vault
                   This field is mutable to allow renaming the storage vault
                 maxLength: 64
-                pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
+                pattern: ^[a-zA-Z][a-zA-Z0-9-_]*$
                 type: string
               s3Properties:
                 description: S3Properties contains configuration for S3 vault type

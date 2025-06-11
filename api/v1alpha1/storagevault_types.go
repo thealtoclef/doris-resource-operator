@@ -93,7 +93,7 @@ type StorageVaultSpec struct {
 	// +kubebuilder:validation:Required
 	ClusterName string `json:"clusterName"`
 
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z][a-zA-Z0-9_]*$`
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z][a-zA-Z0-9-_]*$`
 	// +kubebuilder:validation:MaxLength=64
 	// +kubebuilder:validation:Required
 	// Name of the storage vault

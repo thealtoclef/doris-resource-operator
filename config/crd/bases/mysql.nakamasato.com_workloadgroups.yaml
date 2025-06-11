@@ -64,7 +64,7 @@ spec:
               name:
                 description: Name of the workload group
                 maxLength: 64
-                pattern: ^[a-zA-Z][a-zA-Z0-9_\-]*$
+                pattern: ^[a-zA-Z][a-zA-Z0-9-_]*$
                 type: string
                 x-kubernetes-validations:
                 - message: Workload group name is immutable
