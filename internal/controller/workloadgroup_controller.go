@@ -231,7 +231,7 @@ func (r *WorkloadGroupReconciler) finalizeWorkloadGroup(ctx context.Context, db 
 	}
 
 	// Execute DROP WORKLOAD GROUP statement
-	query := fmt.Sprintf("DROP WORKLOAD GROUP IF EXISTS %s", workloadGroup.Spec.Name)
+	query := fmt.Sprintf("DROP WORKLOAD GROUP IF EXISTS `%s`", workloadGroup.Spec.Name)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute DROP WORKLOAD GROUP query")
@@ -337,7 +337,7 @@ func (r *WorkloadGroupReconciler) createWorkloadGroup(ctx context.Context, db *s
 	}
 
 	// Build the CREATE WORKLOAD GROUP query
-	query := fmt.Sprintf("CREATE WORKLOAD GROUP IF NOT EXISTS %s PROPERTIES (%s)",
+	query := fmt.Sprintf("CREATE WORKLOAD GROUP IF NOT EXISTS `%s` PROPERTIES (%s)",
 		workloadGroup.Spec.Name,
 		strings.Join(props, ", "))
 
@@ -379,7 +379,7 @@ func (r *WorkloadGroupReconciler) updateWorkloadGroup(ctx context.Context, db *s
 		}
 
 		// Execute ALTER WORKLOAD GROUP query to update properties
-		query := fmt.Sprintf("ALTER WORKLOAD GROUP %s PROPERTIES (%s)",
+		query := fmt.Sprintf("ALTER WORKLOAD GROUP `%s` PROPERTIES (%s)",
 			workloadGroup.Spec.Name,
 			strings.Join(props, ", "))
 

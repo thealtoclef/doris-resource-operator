@@ -255,7 +255,7 @@ func (r *CatalogReconciler) finalizeCatalog(ctx context.Context, db *sql.DB, cat
 	}
 
 	// Execute DROP CATALOG statement
-	query := fmt.Sprintf("DROP CATALOG IF EXISTS %s", catalogNameInDoris)
+	query := fmt.Sprintf("DROP CATALOG IF EXISTS `%s`", catalogNameInDoris)
 	_, err := db.ExecContext(ctx, query)
 	if err != nil {
 		log.Error(err, "Failed to execute DROP CATALOG query")
@@ -300,7 +300,7 @@ func (r *CatalogReconciler) fetchCatalog(ctx context.Context, db *sql.DB, name s
 	// Catalog exists, get its properties
 	var catalogName string
 	var createCatalogStmt string
-	err = db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG %s", name)).Scan(&catalogName, &createCatalogStmt)
+	err = db.QueryRowContext(ctx, fmt.Sprintf("SHOW CREATE CATALOG `%s`", name)).Scan(&catalogName, &createCatalogStmt)
 	if err != nil {
 		log.Error(err, "Failed to get catalog properties with SHOW CREATE CATALOG")
 		return true, "", err // Catalog exists but we couldn't fetch properties
@@ -346,12 +346,12 @@ func (r *CatalogReconciler) createCatalog(ctx context.Context, db *sql.DB, catal
 	// Build the CREATE CATALOG query
 	var query string
 	if catalog.Spec.Comment != "" {
-		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS %s COMMENT '%s' PROPERTIES (%s)",
+		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS `%s` COMMENT '%s' PROPERTIES (%s)",
 			catalog.Spec.Name,
 			catalog.Spec.Comment,
 			strings.Join(props, ", "))
 	} else {
-		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS %s PROPERTIES (%s)",
+		query = fmt.Sprintf("CREATE CATALOG IF NOT EXISTS `%s` PROPERTIES (%s)",
 			catalog.Spec.Name,
 			strings.Join(props, ", "))
 	}
@@ -422,7 +422,7 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 		}
 
 		// Execute ALTER CATALOG query to update properties
-		query := fmt.Sprintf("ALTER CATALOG %s SET PROPERTIES (%s)",
+		query := fmt.Sprintf("ALTER CATALOG `%s` SET PROPERTIES (%s)",
 			catalogNameInDoris,
 			strings.Join(props, ", "))
 
@@ -441,7 +441,7 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 	if commentNeedsUpdate {
 		log.Info("Updating catalog comment")
 		// Update comment
-		commentQuery := fmt.Sprintf("ALTER CATALOG %s MODIFY COMMENT = '%s'",
+		commentQuery := fmt.Sprintf("ALTER CATALOG `%s` MODIFY COMMENT = '%s'",
 			catalogNameInDoris, catalog.Spec.Comment)
 		_, err := db.ExecContext(ctx, commentQuery)
 		if err != nil {
@@ -457,7 +457,7 @@ func (r *CatalogReconciler) updateCatalog(ctx context.Context, db *sql.DB, catal
 	if catalogNameInDoris != catalog.Spec.Name {
 		log.Info("Updating catalog name")
 		// Execute ALTER CATALOG RENAME statement
-		renameQuery := fmt.Sprintf("ALTER CATALOG %s RENAME %s",
+		renameQuery := fmt.Sprintf("ALTER CATALOG `%s` RENAME `%s`",
 			catalogNameInDoris, catalog.Spec.Name)
 		_, err := db.ExecContext(ctx, renameQuery)
 		if err != nil {
