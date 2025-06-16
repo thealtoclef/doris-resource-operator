@@ -188,7 +188,7 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err != nil {
 		// Create User if not exists with the password set above.
 		_, err = mysqlClient.ExecContext(ctx,
-			fmt.Sprintf("CREATE USER IF NOT EXISTS '%s' IDENTIFIED BY '%s'", userIdentity, password))
+			fmt.Sprintf("CREATE USER IF NOT EXISTS %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
 			log.Error(err, "[MySQL] Failed to create User", "clusterName", clusterName, "userIdentity", userIdentity)
 			mysqlUser.Status.Phase = constants.PhaseNotReady
@@ -206,7 +206,7 @@ func (r *MySQLUserReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		mysqlUser.Status.UserCreated = true
 		// Update password of User if already exists with the password set above.
 		_, err = mysqlClient.ExecContext(ctx,
-			fmt.Sprintf("ALTER USER '%s' IDENTIFIED BY '%s'", userIdentity, password))
+			fmt.Sprintf("ALTER USER %s IDENTIFIED BY '%s'", userIdentity, password))
 		if err != nil {
 			log.Error(err, "[MySQL] Failed to update password of User", "clusterName", clusterName, "userIdentity", userIdentity)
 			mysqlUser.Status.Phase = constants.PhaseNotReady
